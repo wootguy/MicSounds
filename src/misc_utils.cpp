@@ -192,25 +192,6 @@ int mixStereoToMono(int16_t* pcm, int numSamples) {
 	return numSamples / 2;
 }
 
-vector<float> sample_rate_convert(float* input_samples, int input_count, int input_hz, int output_hz) {
-	Resampler resampler;
-
-	float ratio = (float)output_hz / (float)input_hz;
-	int newSampleCount = ratio * input_count;
-	//int newSampleCountSafe = newSampleCount + 256; // make sure there's enough room in the output buffer
-	vector<float> output_samples;
-	output_samples.resize(newSampleCount);
-
-	resampler.setup(input_hz, output_hz, 1, 32);
-	resampler.inp_count = input_count;
-	resampler.inp_data = input_samples;
-	resampler.out_count = newSampleCount;
-	resampler.out_data = &output_samples[0];
-	resampler.process();
-
-	return output_samples;
-}
-
 int resamplePcm(int16_t* pcm_old, int16_t* pcm_new, int oldRate, int newRate, int numSamples) {
 	float samplesPerStep = (float)oldRate / newRate;
 	int numSamplesNew = (float)numSamples / samplesPerStep;
@@ -223,4 +204,17 @@ int resamplePcm(int16_t* pcm_old, int16_t* pcm_new, int oldRate, int newRate, in
 	}
 
 	return numSamplesNew;
+}
+
+uint64_t steamid_to_steamid64(string steamid) {
+	uint64_t X = atoi(steamid.substr(8, 1).c_str());
+	uint64_t Y = atoi(steamid.substr(10).c_str());
+
+	uint64_t steam64id = 76561197960265728;
+	steam64id += Y * 2;
+	if (X == 1) {
+		steam64id += 1;
+	}
+
+	return steam64id;
 }

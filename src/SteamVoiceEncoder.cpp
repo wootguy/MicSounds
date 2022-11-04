@@ -7,14 +7,12 @@
 
 using namespace std;
 
-SteamVoiceEncoder::SteamVoiceEncoder(int frameSize, int framesPerPacket, int sampleRate, int bitrate,
-	uint64_t steamid, int encodeMode)
+SteamVoiceEncoder::SteamVoiceEncoder(int frameSize, int framesPerPacket, int sampleRate, int bitrate, int encodeMode)
 {
 	this->frameSize = frameSize;
 	this->framesPerPacket = framesPerPacket;
 	this->sampleRate = sampleRate;
 	this->bitrate = bitrate;
-	this->steamid = steamid;
 	sequence = 0;
 
 	int err = 0;
@@ -52,29 +50,29 @@ bool SteamVoiceEncoder::encode_opus_frame(int16_t* samples, OpusFrame& outFrame)
 }
 
 
-string SteamVoiceEncoder::write_steam_voice_packet(int16_t* samples, int sampleLen) {
+vector<uint8_t> SteamVoiceEncoder::write_steam_voice_packet(int16_t* samples, int sampleLen, uint64_t steamid64) {
+	vector<uint8_t> packet;
 
 	if (sampleLen % (frameSize * framesPerPacket) != 0) {
 		fprintf(stderr, "write_steam_voice_packet requires exactly %d samples\n", sampleLen);
-		return "";
+		return packet;
 	}
 
 	for (int i = 0; i < framesPerPacket; i++) {
 		if (!encode_opus_frame(samples + i * frameSize, frameBuffer[i])) {
-			return "";
+			return packet;
 		}
 	}
-
-	vector<uint8_t> packet;
+	
 	packet.reserve(512);
-	packet.push_back((uint64_t)(steamid >> 0) & 0xff);
-	packet.push_back((uint64_t)(steamid >> 8) & 0xff);
-	packet.push_back((uint64_t)(steamid >> 16) & 0xff);
-	packet.push_back((uint64_t)(steamid >> 24) & 0xff);
-	packet.push_back((uint64_t)(steamid >> 32) & 0xff);
-	packet.push_back((uint64_t)(steamid >> 40) & 0xff);
-	packet.push_back((uint64_t)(steamid >> 48) & 0xff);
-	packet.push_back((uint64_t)(steamid >> 56) & 0xff);
+	packet.push_back((uint64_t)(steamid64 >> 0) & 0xff);
+	packet.push_back((uint64_t)(steamid64 >> 8) & 0xff);
+	packet.push_back((uint64_t)(steamid64 >> 16) & 0xff);
+	packet.push_back((uint64_t)(steamid64 >> 24) & 0xff);
+	packet.push_back((uint64_t)(steamid64 >> 32) & 0xff);
+	packet.push_back((uint64_t)(steamid64 >> 40) & 0xff);
+	packet.push_back((uint64_t)(steamid64 >> 48) & 0xff);
+	packet.push_back((uint64_t)(steamid64 >> 56) & 0xff);
 
 	packet.push_back(11);
 	packet.push_back(sampleRate & 0xff);
@@ -111,20 +109,7 @@ string SteamVoiceEncoder::write_steam_voice_packet(int16_t* samples, int sampleL
 
 	static string hex_codes = "0123456789abcdef";
 
-	string hexdata;
-	for (int i = 0; i < packet.size(); i++) {
-		hexdata += hex_codes[packet[i] >> 4];
-		hexdata += hex_codes[packet[i] & 0xf];
-	}
-
-	/*
-	if (packet.size() > 500) {
-		fprintf(stderr, "TOO MUCH DATA %d\n", packet.size());
-		return -1;
-	}
-	*/
-
-	return hexdata;
+	return packet;
 }
 
 void SteamVoiceEncoder::reset()
