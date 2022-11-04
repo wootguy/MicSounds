@@ -1,12 +1,8 @@
 #include "main.h"
 #include <string>
-#include "enginecallback.h"
-#include "eiface.h"
 #include "misc_utils.h"
-#include <algorithm>
-#include <thread>
-#include "ThreadSafeQueue.h"
-#include "mstream.h"
+#include "ChatSoundConverter.h"
+#include "crc32.h"
 
 using namespace std;
 
@@ -26,24 +22,92 @@ plugin_info_t Plugin_info = {
 bool g_admin_pause_packets = false;
 volatile bool g_plugin_exiting = false;
 
+ChatSoundConverter* g_soundConverters[MAX_PLAYERS];
 
 void PluginInit() {
 	g_plugin_exiting = false;
 
 	g_dll_hooks.pfnStartFrame = StartFrame;
 
-	REG_SVR_COMMAND("mic_sound", mic_sound);
+	REG_SVR_COMMAND("play_mic_sound", mic_sound);
+	REG_SVR_COMMAND("stop_mic_sound", stop_mic_sound);
 
 	g_main_thread_id = std::this_thread::get_id();
+	
+	for (int i = 0; i < MAX_PLAYERS; i++) {
+		g_soundConverters[i] = new ChatSoundConverter(i+1);
+	}
+
+	crc32_init();
 }
 
+// stop a mic sound for a specific player only
+void stop_mic_sound() {
+	CommandArgs args = CommandArgs();
+	args.loadArgs();
+
+	int playerIdx = atoi(args.ArgV(1).c_str());
+	bool stopForEveryone = atoi(args.ArgV(2).c_str()) > 0;
+
+	if (playerIdx < 1 || playerIdx > gpGlobals->maxClients) {
+		println("[MicSounds] Invalid client index");
+		return;
+	}
+
+	if (stopForEveryone) {
+		g_soundConverters[playerIdx-1]->listeners = 0;
+		println("[MicSounds] Stop sound from player %d", playerIdx);
+	}
+	else {
+		uint32_t plrBit = 1 << (playerIdx & 31);
+		println("[MicSounds] Stop sounds for player %d", playerIdx);
+
+		for (int i = 0; i < gpGlobals->maxClients; i++) {
+			g_soundConverters[i]->listeners &= ~plrBit;
+		}
+	}
+}
+
+// test command: play_mic_sound twlz/poney.wav 100 22 1 2
 void mic_sound() {
 	CommandArgs args = CommandArgs();
 	args.loadArgs();
 
 	string wantSound = args.ArgV(1);
 
-	println("Zomg play sound: %s", wantSound.c_str());
+	string fpath = args.ArgV(1);
+	int pitch = atoi(args.ArgV(2).c_str());
+	int volume = atoi(args.ArgV(3).c_str());
+	int playerIdx = atoi(args.ArgV(4).c_str());
+	uint32_t listeners = strtoul(args.ArgV(5).c_str(), NULL, 10);
+
+	if (playerIdx < 1 || playerIdx > gpGlobals->maxClients) {
+		println("[MicSounds] invalid player idx");
+		return;
+	}
+
+	edict_t* plr = INDEXENT(playerIdx);
+
+	if (!isValidPlayer(plr)) {
+		println("[MicSounds] invalid player");
+		return;
+	}
+
+	string steamid = (*g_engfuncs.pfnGetPlayerAuthId)(plr);
+	uint64_t steamid64 = steamid64_min + playerIdx;
+
+	if (steamid != "STEAM_ID_LAN" && steamid != "BOT") {
+		steamid64 = steamid_to_steamid64(steamid);
+	}
+
+	string cmd = UTIL_VarArgs("%s?%d?%d?%llu", fpath.c_str(), pitch, volume, steamid64);
+	int converterIdx = playerIdx - 1;
+
+	g_soundConverters[converterIdx]->commands.enqueue(cmd);
+	g_soundConverters[converterIdx]->outPackets.clear();
+	g_soundConverters[converterIdx]->listeners = listeners;
+
+	println("[MicSounds] Play %s %d %d %u", fpath.c_str(), pitch, volume, listeners);
 
 	return;
 }
@@ -72,11 +136,35 @@ void handleThreadPrints() {
 void StartFrame() {
 	g_Scheduler.Think();
 	handleThreadPrints();
+
+	
+	for (int i = 0; i < MAX_PLAYERS; i++) {
+#ifdef SINGLE_THREAD_MODE
+		g_soundConverters[i]->think();
+#endif
+		g_soundConverters[i]->play_samples();
+
+		string err;
+		if (g_soundConverters[i]->errors.dequeue(err)) {
+			ClientPrintAll(HUD_PRINTNOTIFY, err.c_str());
+		}
+	}
+
 	RETURN_META(MRES_IGNORED);
 }
 
 void PluginExit() {
 	g_plugin_exiting = true;
-	//stop_network_threads();
+
+	for (int i = 0; i < MAX_PLAYERS; i++) {
+		g_soundConverters[i]->exitSignal = true;
+	}
+
+	println("Waiting for converter threads to join...");
+
+	for (int i = 0; i < MAX_PLAYERS; i++) {
+		delete g_soundConverters[i];
+	}
+
 	println("Plugin exit finish");
 }

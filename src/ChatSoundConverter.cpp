@@ -10,326 +10,338 @@
 
 using namespace std;
 
-static uint64_t steam_min = 0x0110000100000001;
-static uint64_t steam_max = 0x01100001FFFFFFFF;
+float g_packet_delay = 0.05f;
 
-ChatSoundConverter::ChatSoundConverter(string commandFilePath, string chatsoundCfgPath, string svenRootPath) {
-	this->commandFilePath = commandFilePath;
-	this->chatsoundCfgPath = chatsoundCfgPath;
-	this->svenRootPath = svenRootPath;
-
+ChatSoundConverter::ChatSoundConverter(int playerIdx) {
 	sampleRate = 12000; // opus allows: 8, 12, 16, 24, 48 khz
 	frameDuration = 10; // opus allows: 2.5, 5, 10, 20, 40, 60, 80, 100, 120
 	frameSize = (sampleRate / 1000) * frameDuration; // samples per frame
 	framesPerPacket = 5; // 2 = minimum amount of frames for sven to accept packet
 	packetDelay = frameDuration * framesPerPacket; // millesconds between output packets
 	samplesPerPacket = frameSize * framesPerPacket;
-	opusBitrate = 32000; // 32khz = steam default
+	opusBitrate = 32000; // 32kbps = steam default
+
+	readBuffer = new uint8_t[STREAM_BUFFER_SIZE];
+	rateBufferIn = new float[STREAM_BUFFER_SIZE];
+	rateBufferOut = new float[STREAM_BUFFER_SIZE];
+
+	this->playerIdx = playerIdx;
+	encoder = new SteamVoiceEncoder(frameSize, framesPerPacket, sampleRate, opusBitrate, OPUS_APPLICATION_AUDIO);
+
+	thinkThread = NULL;
+	#ifndef SINGLE_THREAD_MODE
+		thinkThread = new thread(&ChatSoundConverter::think, this);
+	#endif
 }
 
-uint64_t steamid_to_steamid64(string steamid) {
-	uint64_t X = atoi(steamid.substr(8, 1).c_str());
-	uint64_t Y = atoi(steamid.substr(10).c_str());
+ChatSoundConverter::~ChatSoundConverter() {
+	exitSignal = true;
 
-	uint64_t steam64id = 76561197960265728;
-	steam64id += Y * 2;
-	if (X == 1) {
-		steam64id += 1;
+	if (thinkThread) {
+		thinkThread->join();
+		delete thinkThread;
 	}
+	delete encoder;
+
+	delete[] readBuffer;
+	delete[] rateBufferIn;
+	delete[] rateBufferOut;
+}
+
+void ChatSoundConverter::play_samples() {
+	if (listeners == 0) {
+		return;
+	}
+
+	edict_t* plr = INDEXENT(playerIdx);
+
+	if (!isValidPlayer(plr)) {
+		return;
+	}
+
+	if (nextPacketTime > g_engfuncs.pfnTime()) {
+		return;
+	}
+
+	VoicePacket packet;
+	if (!outPackets.dequeue(packet)) {
+		return;
+	}
+
+	if (packet.isNewSound) {
+		packetNum = 0;
+		playbackStartTime = g_engfuncs.pfnTime();
+	}
+
+	for (int i = 1; i <= gpGlobals->maxClients; i++) {
+		edict_t* plr = INDEXENT(i);
+		uint32_t plrBit = 1 << (i & 31);
+
+		if (!isValidPlayer(plr)) {
+			continue;
+		}
+
+		if ((listeners & plrBit) == 0) {
+			continue;
+		}
+
+		bool reliablePackets = reliable & plrBit;
+		int sendMode = reliablePackets ? MSG_ONE : MSG_ONE_UNRELIABLE;
+
+		// svc_voicedata
+		MESSAGE_BEGIN(sendMode, 53, NULL, plr);
+		WRITE_BYTE(playerIdx-1); // entity which is "speaking"
+		WRITE_SHORT(packet.size); // compressed audio length
+
+		// Ideally, packet data would be written once and re-sent to whoever wants it.
+		// However there's no way to change the message destination after creation.
+		// Data is combined into as few chunks as possible to minimize the loops
+		// needed to write the data. This optimization loops about 10% as much as 
+		// writing bytes one-by-one for every player.
+
+		// First, data is split into strings delimted by zeros. It can't all be one string
+		// because a string can't contain zeros, and the data is not guaranteed to end with a 0.
+		for (int k = 0; k < packet.sdata.size(); k++) {
+			WRITE_STRING(packet.sdata[k].c_str()); // includes the null terminater
+		}
+
+		// ...but that can leave a large chunk of bytes at the end, so the remainder is
+		// also combined into 32bit ints.
+		for (int k = 0; k < packet.ldata.size(); k++) {
+			WRITE_LONG(packet.ldata[k]);
+		}
+
+		// whatever is left at this point will be less than 4 iterations.
+		for (int k = 0; k < packet.data.size(); k++) {
+			WRITE_BYTE(packet.data[k]);
+		}
+
+		MESSAGE_END();
+	}
+
+	packetNum++;
+	nextPacketTime = playbackStartTime + packetNum * (g_packet_delay - 0.0001f); // slightly fast to prevent mic getting quiet/choppy
+	//println("Play %d", packetNum);
+
+	if (nextPacketTime < g_engfuncs.pfnTime()) {
+		play_samples();
+	}
+}
+
+float calcNextPacketDelay(float playback_start_time, float packetNum) {
+	float serverTime = g_engfuncs.pfnTime();
+	float ideal_next_packet_time = playback_start_time + packetNum * (g_packet_delay - 0.0001f); // slightly fast to prevent mic getting quiet/choppy
+	return (ideal_next_packet_time - serverTime) - gpGlobals->frametime;
+}
+
+void ChatSoundConverter::handleCommand(string cmd) {
+	vector<string> parts = splitString(cmd, "?");
+
+	if (parts.size() < 4) {
+		println("[MicSounds] Invalid command '%s'", cmd.c_str());
+		return;
+	}
+
+	string fpath = parts[0];
+	pitch = atoi(parts[1].c_str());
+	volume = atoi(parts[2].c_str());
+	steamid64 = strtoull(parts[3].c_str(), NULL, 10);
+
+	if (soundFile) {
+		fclose(soundFile);
+		soundFile = NULL;
+	}
+
+	soundFile = open_sound_file(fpath);
+
+	if (!soundFile) {
+		errors.enqueue(UTIL_VarArgs("[MicSounds] ERROR: Failed to open file: %s\n", fpath.c_str()));
+		return;
+	}
+
+	if (fread(&wavHdr, sizeof(wav_hdr), 1, soundFile) != 1
+		|| strncmp((char*)wavHdr.RIFF, "RIFF", 4) || strncmp((char*)wavHdr.WAVE, "WAVE", 4)) {
+		errors.enqueue(UTIL_VarArgs("[MicSounds] ERROR: Invalid wav header: %s\n", fpath.c_str()));
+		fclose(soundFile);
+		soundFile = NULL;
+		return;
+	}
+
+	if (wavHdr.bitsPerSample != 8 || wavHdr.NumOfChan != 1) {
+		errors.enqueue(UTIL_VarArgs("[MicSounds] ERROR: Expected 8-bit mono samples: %s\n", fpath.c_str()));
+		fclose(soundFile);
+		soundFile = NULL;
+		return;
+	}
+
+	resampler.setup(wavHdr.SamplesPerSec, sampleRate, 1, 32);
+	resampler.inp_data = rateBufferIn;
+	resampler.inp_count = 0;
+	resampler.out_count = STREAM_BUFFER_SIZE;
+	resampler.out_data = rateBufferOut;
+	encodeBuffer.clear();
+	startingNewSound = true;
+	encoder->reset();
+}
+
+void ChatSoundConverter::think() {
 	
-	return steam64id;
-}
-
-int ChatSoundConverter::pollCommands() {
-	loadChatsounds();
-
-	printf("Command file: %s\n", commandFilePath.c_str());
-
-	ifstream ifs(commandFilePath);
-
-	if (ifs.is_open())
-	{
-		ifs.seekg(0, ios_base::end);
-
-		string line;
-		while (true)
-		{
-			while (getline(ifs, line)) {
-				if (line == "!RELOAD_SOUNDS") {
-					loadChatsounds();
-					continue;
-				}
-				vector<string> parts = splitString(line, " ");
-
-				if (parts.size() < 5) {
-					continue;
-				}
-
-				string trigger = parts[0];
-				int pitch = atoi(parts[1].c_str());
-				int volume = atoi(parts[2].c_str());
-				int id = atoi(parts[3].c_str());
-				uint64_t steamid64 = steamid_to_steamid64(parts[4]);
-
-				printf("%s %d %d %d %llu\n", trigger.c_str(), pitch, volume, id, steamid64);
-
-				ConvertJob* job = createConvertJob(trigger, pitch, volume, id, steamid64);
-
-				if (job) {
-					jobs.push_back(job);
-				}
-			}
-			if (!ifs.eof())
-				break; // Ensure end of read was EOF.
-			ifs.clear();
-
-			if (jobs.size()) {
-				vector<ConvertJob*> newJobs;
-
-				for (int i = 0; i < jobs.size(); i++) {
-					if (!convert(jobs[i])) {
-						newJobs.push_back(jobs[i]);
-					}
-					else {
-						delete jobs[i];
-						//printf("Finished convert job\n");
-					}
-				}
-
-				jobs = newJobs;
-			}
-			else {
-				// TODO: use windows/linux file change notifations instead of this
-				std::this_thread::sleep_for(std::chrono::milliseconds(10));
-			}
-		}
-	}
-
-	return 0;
-}
-
-void ChatSoundConverter::loadChatsounds() {
-	chatsounds_to_pcm.clear();
-
-	ifstream file(chatsoundCfgPath);
-
-	vector<string> search_paths = {
-		svenRootPath + "/svencoop_addon/sound/",
-		svenRootPath + "/svencoop/sound/",
-		svenRootPath + "/svencoop_downloads/sound/",
-	};
-
-	printf("\nLoading chatsounds...\n");
-
-	if (file.is_open())
-	{
-		string line;
-		while (getline(file, line)) {
-			if (line.length() == 0 || line.find("//") == 0 || line.find("[extra_sounds]") == 0) {
-				continue;
-			}
-
-			vector<string> parts = splitString(line, " \t");
-			if (parts.size() < 2) {
-				continue;
-			}
-			string trigger = parts[0];
-			string relPath = parts[1];
-
-			string fpath;
-
-			for (int i = 0; i < search_paths.size(); i++) {
-				string testPath = search_paths[i] + relPath;
-				if (fileExists(testPath)) {
-					fpath = testPath;
-					break;
-				}
-			}
-			
-			if (fpath.size() == 0) {
-				printf("Failed to find chatsound: %s\n", relPath.c_str());
-				continue;
-			}
-
-			//printf("GOT CSOUNMD: %s = %s\n", trigger.c_str(), fpath.c_str());
-			loadChatsound(trigger, fpath);
+#ifdef SINGLE_THREAD_MODE
+	if (!exitSignal) {
+#else
+	while (!exitSignal) {
+		this_thread::sleep_for(chrono::milliseconds(50));
+#endif
+		string cmd;
+		if (commands.dequeue(cmd)) {
+			handleCommand(cmd);
 		}
 
-		// TODO: use windows/linux file change notifations instead of this
-		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		while (!exitSignal && (outPackets.size() < IDEAL_BUFFER_SIZE) && (soundFile || encodeBuffer.size())) {
+			write_output_packet();
+		}
 	}
-
-	int total = 0;
-	for (auto const& x : chatsounds_to_pcm) {
-		total += x.second.size();
-	}
-
-	printf("Loaded %.2f MB of audio data into memory\n", (float)total / (1024.0f*1024.0f));
 }
 
-bool ChatSoundConverter::loadChatsound(string trigger, string inputPath) {
-	ifstream inputFile(inputPath, ios::binary);
-	wav_hdr header;
-
-	inputFile.read((char*)&header, sizeof(header));
-
-	if (header.RIFF[0] != 'R' || header.RIFF[1] != 'I' || header.RIFF[2] != 'F' || header.RIFF[3] != 'F') {
-		fprintf(stderr, "ERROR: Invalid WAV file\n");
+bool ChatSoundConverter::read_samples() {
+	if (!soundFile) {
 		return false;
 	}
 
-	int numSamples = header.ChunkSize - (sizeof(wav_hdr) - 8);
+	int outputSampleCount = 0;
 
-	int16_t* newSamples;
+	float scale = (float)volume / 100.0f;
 
-	if (header.bitsPerSample == 8) {
-		uint8_t* samples = new uint8_t[numSamples];
-		inputFile.read((char*)samples, numSamples);
-		inputFile.close();
+	if (resampler.inp_count == 0) {
+		// resampler ran out of input data
+		uint32_t readSamples = fread(readBuffer, 1, STREAM_BUFFER_SIZE, soundFile);
 
-		// convert 8bit to 16bit
-		newSamples = new int16_t[numSamples];
-		for (int i = 0; i < numSamples; i++) {
-			newSamples[i] = ((int16_t)samples[i] - 128) * 256;
+		if (readSamples == 0) {
+			//println("Reached end of sound file");
+			fclose(soundFile);
+			soundFile = NULL;
+			outputSampleCount = STREAM_BUFFER_SIZE - resampler.out_count;
 		}
 
-		delete[] samples;
+		for (int i = 0; i < readSamples; i++) {
+			int16_t i16 = ((int16_t)readBuffer[i] - 128) * 256;
+			rateBufferIn[i] = ((float)i16 / 32768.0f) * scale;
+		}
+
+		resampler.inp_count = readSamples;
+		resampler.inp_data = rateBufferIn;
+		//println("Refilled input buffer with %d samples", readSamples);
 	}
-	else if (header.bitsPerSample == 16) {
-		newSamples = new int16_t[numSamples];
-		inputFile.read((char*)newSamples, numSamples * sizeof(int16_t));
-		inputFile.close();
+
+	if (resampler.out_count == 0) {
+		// completely filled output buffer
+		resampler.out_count = STREAM_BUFFER_SIZE;
+		resampler.out_data = rateBufferOut;
+		outputSampleCount = STREAM_BUFFER_SIZE;
 	}
-	else {
-		fprintf(stderr, "ERROR: Expected 8 or 16 bit samples\n");
+
+	// TODO: pitch + volume
+	if (outputSampleCount) {
+		if (pitch != 100) {
+			float speed = (float)pitch / 100;			
+			float samplesPerStep = (float)sampleRate / (float)sampleRate*speed;
+			int numSamplesNew = (float)outputSampleCount / samplesPerStep;
+			float t = 0;
+
+			for (int i = 0; i < numSamplesNew; i++) {
+				int newIdx = t;
+				encodeBuffer.push_back(clampf(rateBufferOut[newIdx], -1.0f, 1.0f) * 31767.0f);
+				t += samplesPerStep;
+			}
+		}
+		else {
+			for (int i = 0; i < outputSampleCount; i++) {
+				encodeBuffer.push_back(clampf(rateBufferOut[i], -1.0f, 1.0f) * 31767.0f);
+			}
+		}
+	}
+
+	if (!soundFile) {
 		return false;
 	}
 
-	if (header.NumOfChan == 2) {
-		numSamples = mixStereoToMono(newSamples, numSamples);
-	}
-	else if (header.NumOfChan != 1) {
-		fprintf(stderr, "ERROR: Unexpected channel count %d\n", header.NumOfChan);
-		return false;
-	}
-
-	if (header.SamplesPerSec != sampleRate) {
-		//fprintf(stderr, "Resampling %d to %d\n", header.SamplesPerSec, sampleRate);
-
-		float* floatSamples = new float[numSamples];
-		for (int i = 0; i < numSamples; i++) {
-			floatSamples[i] = (float)newSamples[i] / 32768.0f;
-		}
-
-		vector<float> resampled = sample_rate_convert(floatSamples, numSamples, header.SamplesPerSec, sampleRate);
-		delete[] floatSamples;
-
-		delete[] newSamples;
-		numSamples = resampled.size();
-		newSamples = new int16_t[numSamples];
-
-		for (int i = 0; i < numSamples; i++) {
-			newSamples[i] = clampf(resampled[i], -1.0f, 1.0f) * 31767.0f;
-		}
-	}
-
-	vector<int8_t> memSamples;
-	memSamples.reserve(numSamples);
-
-	for (int i = 0; i < numSamples; i++) {
-		memSamples.push_back(newSamples[i] >> 8);
-	}
-
-	chatsounds_to_pcm[trigger] = memSamples;
-
-	delete[] newSamples;
+	resampler.process();
 
 	return true;
 }
 
-ConvertJob* ChatSoundConverter::createConvertJob(string trigger, int pitch, int volume, int id, uint64_t steamid64) {
-	if (chatsounds_to_pcm.find(trigger) == chatsounds_to_pcm.end()) {
-		printf("Unknown chatsound trigger '%s'\n", trigger.c_str());
-		return NULL;
+void ChatSoundConverter::write_output_packet() {
+	while (encodeBuffer.size() < samplesPerPacket && read_samples()) ;
+
+	if (encodeBuffer.size() == 0) {
+		//println("No data to encode");
+		return; // no data to write
 	}
-	
-	vector<int8_t>& loadedSamples = chatsounds_to_pcm[trigger];
-	int numSamples = loadedSamples.size();
-	int16_t* samples = new int16_t[numSamples];
-	float scale = (float)volume / 100.0f;
-
-	for (int i = 0; i < numSamples; i++) {
-		float scaledSample = (loadedSamples[i] << 8) * scale;
-		samples[i] = clamp(scaledSample, -32768, 32767);
-	}
-
-	if (numSamples % samplesPerPacket != 0) {
-		int samplesToAdd = samplesPerPacket - (numSamples % samplesPerPacket);
-		int16_t* paddedSamples = new int16_t[numSamples + samplesToAdd];
-		memset((char*)(paddedSamples + numSamples), 0, samplesToAdd * sizeof(int16_t));
-		memcpy(paddedSamples, samples, numSamples * sizeof(int16_t));
-
-		delete[] samples;
-		samples = paddedSamples;
-		numSamples += samplesToAdd;
-	}
-
-	if (pitch != 100) {
-		float speed = (float)pitch / 100;
-		int estNewSampleCount = numSamples * (1.0f / speed) * 1.1f;
-		int16_t* resampled = new int16_t[estNewSampleCount];
-
-		numSamples = resamplePcm(samples, resampled, sampleRate, sampleRate * (1.0f / speed), numSamples);
-
-		delete[] samples;
-		samples = resampled;
-	}
-
-	string outputPath = svenRootPath + "/svencoop/scripts/plugins/temp/" + to_string(id) + ".spk";
-
-	ofstream* outFile = new ofstream(outputPath);
-	if (!outFile->good()) {
-		fprintf(stderr, "Failed to open output file %s\n", outputPath.c_str());
-		delete[] samples;
-		delete outFile;
-		return NULL;
-	}
-
-	SteamVoiceEncoder* encoder = new SteamVoiceEncoder(frameSize, framesPerPacket, sampleRate, opusBitrate, steamid64, OPUS_APPLICATION_AUDIO);
-	return new ConvertJob(samples, numSamples, outFile, encoder);
-}
-
-bool ChatSoundConverter::convert(ConvertJob* job) {
-	string packet = job->encoder->write_steam_voice_packet(job->samples + job->offset, samplesPerPacket);
-	*(job->outFile) << packet << endl;
-
-	job->offset += samplesPerPacket;
-
-	bool finished = job->offset >= job->numSamples;
-	
-	// angelscript waits for a specific file size before playing.
-	// really short sounds need some padding at the end.
-	if (finished) {
-		while (job->outFile->tellp() < 2048) {
-			*(job->outFile) << "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n";
+	else if (encodeBuffer.size() < samplesPerPacket) {
+		// pad the buffer to fill a packet
+		println("pad to fill opus packet");
+		for (int i = encodeBuffer.size(); i < samplesPerPacket; i++) {
+			encodeBuffer.push_back(0);
 		}
 	}
 
+	vector<uint8_t> bytes = encoder->write_steam_voice_packet(&encodeBuffer[0], samplesPerPacket, steamid64);
+	encodeBuffer.erase(encodeBuffer.begin(), encodeBuffer.begin() + samplesPerPacket);
 
-	return finished;
+	VoicePacket packet;
+	packet.size = 0;
+
+	string sdat = "";
+
+	for (int x = 0; x < bytes.size(); x++) {
+		byte bval = bytes[x];
+		packet.data.push_back(bval);
+
+		// combine into 32bit ints for faster writing later
+		if (packet.data.size() == 4) {
+			uint32 val = (packet.data[3] << 24) + (packet.data[2] << 16) + (packet.data[1] << 8) + packet.data[0];
+			packet.ldata.push_back(val);
+			packet.data.resize(0);
+		}
+
+		// combine into string for even faster writing later
+		if (bval == 0) {
+			packet.sdata.push_back(sdat);
+			packet.ldata.resize(0);
+			packet.data.resize(0);
+			sdat = "";
+		}
+		else {
+			sdat += (char)bval;
+		}
+	}
+
+	packet.size = bytes.size();
+	
+	if (startingNewSound) {
+		packet.isNewSound = true;
+		startingNewSound = false;
+	}
+
+	//println("Write %d samples with %d left. %d packets in queue", samplesPerPacket, encodeBuffer.size(), outPackets.size());
+
+	outPackets.enqueue(packet);
 }
 
-ConvertJob::ConvertJob(int16_t* samples, int numSamples, ofstream* outFile, SteamVoiceEncoder* encoder) {
-	this->samples = samples;
-	this->numSamples = numSamples;
-	this->outFile = outFile;
-	this->encoder = encoder;
-	offset = 0;
-}
+FILE* ChatSoundConverter::open_sound_file(string path) {
+	static vector<const char*> search_paths = {
+		"svencoop_addon/sound/",
+		"svencoop/sound/",
+		"svencoop_downloads/sound/",
+	};
 
-ConvertJob::~ConvertJob() {
-	outFile->close();
-	delete[] samples;
-	delete outFile;
-	delete encoder;
+	for (int i = 0; i < search_paths.size(); i++) {
+		string testPath = search_paths[i] + path;
+		FILE* file = fopen(testPath.c_str(), "rb");
+		if (file) {
+			return file;
+		}
+	}
+
+	return NULL;
 }

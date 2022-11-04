@@ -7,7 +7,6 @@ project(MicSounds)
 
 set(SOURCE_FILES
 	src/main.h src/main.cpp
-	src/FakeMic.h src/FakeMic.cpp
 	src/misc_utils.h src/misc_utils.cpp
 	src/meta_utils.h src/meta_utils.cpp
 	src/meta_init.h src/meta_init.cpp

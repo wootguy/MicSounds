@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <fstream>
+#include <vector>
 #include "opus/opus.h"
 
 #define ENCODE_BUFFER_SIZE 4096
@@ -14,13 +15,13 @@ struct OpusFrame {
 // must call crc32_init() before using this class
 class SteamVoiceEncoder {
 public:
-	SteamVoiceEncoder(int frameSize, int framesPerPacket, int sampleRate, int bitrate, uint64_t steamid, int encodeMode);
+	SteamVoiceEncoder(int frameSize, int framesPerPacket, int sampleRate, int bitrate, int encodeMode);
 
 	~SteamVoiceEncoder();
 
 	// sampleLen must be a multiple of (framesize*framesPerPacket)
 	// returns size of packet, or -1 on failure
-	std::string write_steam_voice_packet(int16_t* samples, int sampleLen);
+	std::vector<uint8_t> write_steam_voice_packet(int16_t* samples, int sampleLen, uint64_t steamid64);
 	
 	// resets encoder and sequence number for starting a new stream of audio (not necessary?)
 	void reset();
@@ -33,7 +34,6 @@ private:
 	// samples must have frameSize length
 	bool encode_opus_frame(int16_t* samples, OpusFrame& outFrame);
 
-	uint64_t steamid;
 	int frameSize;
 	int framesPerPacket;
 	int sampleRate;
