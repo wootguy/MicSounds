@@ -27,10 +27,12 @@ ChatSoundConverter* g_soundConverters[MAX_PLAYERS];
 void PluginInit() {
 	g_plugin_exiting = false;
 
+	g_dll_hooks.pfnServerActivate = MapInit;
 	g_dll_hooks.pfnStartFrame = StartFrame;
 
 	REG_SVR_COMMAND("play_mic_sound", mic_sound);
 	REG_SVR_COMMAND("stop_mic_sound", stop_mic_sound);
+	REG_SVR_COMMAND("config_mic_sound", config_mic_sound);
 
 	g_main_thread_id = std::this_thread::get_id();
 	
@@ -41,7 +43,27 @@ void PluginInit() {
 	crc32_init();
 }
 
-// stop a mic sound for a specific player only
+void MapInit(edict_t* pEdictList, int edictCount, int maxClients) {
+	// reset reliable flags to prevent desyncs/overflows when joining the game
+	// the angelscript plugin should reconfigure with a delay
+	for (int i = 0; i < gpGlobals->maxClients; i++) {
+		g_soundConverters[i]->reliable = 0;
+	}
+}
+
+void config_mic_sound() {
+	CommandArgs args = CommandArgs();
+	args.loadArgs();
+
+	// bitfield indicated which players get reliable packets
+	uint32_t reliableMode = strtoul(args.ArgV(1).c_str(), NULL, 10);
+	println("[MicSounds] set reliable bits %u from %s", reliableMode, args.ArgV(1).c_str());
+
+	for (int i = 0; i < gpGlobals->maxClients; i++) {
+		g_soundConverters[i]->reliable = reliableMode;
+	}
+}
+
 void stop_mic_sound() {
 	CommandArgs args = CommandArgs();
 	args.loadArgs();
@@ -55,7 +77,7 @@ void stop_mic_sound() {
 	}
 
 	if (stopForEveryone) {
-		g_soundConverters[playerIdx-1]->listeners = 0;
+		g_soundConverters[playerIdx - 1]->listeners = 0;
 		println("[MicSounds] Stop sound from player %d", playerIdx);
 	}
 	else {
@@ -67,6 +89,7 @@ void stop_mic_sound() {
 		}
 	}
 }
+
 
 // test command: play_mic_sound twlz/poney.wav 100 22 1 2
 void mic_sound() {

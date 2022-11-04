@@ -56,6 +56,7 @@ void ChatSoundConverter::play_samples() {
 	edict_t* plr = INDEXENT(playerIdx);
 
 	if (!isValidPlayer(plr)) {
+		listeners = 0;
 		return;
 	}
 
@@ -126,12 +127,6 @@ void ChatSoundConverter::play_samples() {
 	if (nextPacketTime < g_engfuncs.pfnTime()) {
 		play_samples();
 	}
-}
-
-float calcNextPacketDelay(float playback_start_time, float packetNum) {
-	float serverTime = g_engfuncs.pfnTime();
-	float ideal_next_packet_time = playback_start_time + packetNum * (g_packet_delay - 0.0001f); // slightly fast to prevent mic getting quiet/choppy
-	return (ideal_next_packet_time - serverTime) - gpGlobals->frametime;
 }
 
 void ChatSoundConverter::handleCommand(string cmd) {
@@ -279,7 +274,7 @@ void ChatSoundConverter::write_output_packet() {
 	}
 	else if (encodeBuffer.size() < samplesPerPacket) {
 		// pad the buffer to fill a packet
-		println("pad to fill opus packet");
+		//println("pad to fill opus packet");
 		for (int i = encodeBuffer.size(); i < samplesPerPacket; i++) {
 			encodeBuffer.push_back(0);
 		}
