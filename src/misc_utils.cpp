@@ -1,4 +1,5 @@
 #include "misc_utils.h"
+#include "zita-resampler/resampler.h"
 
 string getFileExtension(string fpath) {
 	int dot = fpath.find_last_of(".");
@@ -167,4 +168,59 @@ int clamp(int val, int min, int max) {
 		return min;
 	}
 	return val;
+}
+
+bool fileExists(const std::string& name) {
+	if (FILE* file = fopen(name.c_str(), "r")) {
+		fclose(file);
+		return true;
+	}
+	else {
+		return false;
+	}
+}
+
+// mixes samples in-place without a new array
+int mixStereoToMono(int16_t* pcm, int numSamples) {
+
+	for (int i = 0; i < numSamples / 2; i++) {
+		float left = ((float)pcm[i * 2] / 32768.0f);
+		float right = ((float)pcm[i * 2 + 1] / 32768.0f);
+		pcm[i] = clampf(left + right, -1.0f, 1.0f) * 32767;
+	}
+
+	return numSamples / 2;
+}
+
+vector<float> sample_rate_convert(float* input_samples, int input_count, int input_hz, int output_hz) {
+	Resampler resampler;
+
+	float ratio = (float)output_hz / (float)input_hz;
+	int newSampleCount = ratio * input_count;
+	//int newSampleCountSafe = newSampleCount + 256; // make sure there's enough room in the output buffer
+	vector<float> output_samples;
+	output_samples.resize(newSampleCount);
+
+	resampler.setup(input_hz, output_hz, 1, 32);
+	resampler.inp_count = input_count;
+	resampler.inp_data = input_samples;
+	resampler.out_count = newSampleCount;
+	resampler.out_data = &output_samples[0];
+	resampler.process();
+
+	return output_samples;
+}
+
+int resamplePcm(int16_t* pcm_old, int16_t* pcm_new, int oldRate, int newRate, int numSamples) {
+	float samplesPerStep = (float)oldRate / newRate;
+	int numSamplesNew = (float)numSamples / samplesPerStep;
+	float t = 0;
+
+	for (int i = 0; i < numSamplesNew; i++) {
+		int newIdx = t;
+		pcm_new[i] = pcm_old[newIdx];
+		t += samplesPerStep;
+	}
+
+	return numSamplesNew;
 }
