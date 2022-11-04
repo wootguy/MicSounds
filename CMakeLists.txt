@@ -12,17 +12,22 @@ set(SOURCE_FILES
 	src/meta_utils.h src/meta_utils.cpp
 	src/meta_init.h src/meta_init.cpp
 	src/Scheduler.h src/Scheduler.cpp
+	src/ChatSoundConverter.h src/ChatSoundConverter.cpp
+	src/SteamVoiceEncoder.h src/SteamVoiceEncoder.cpp
+	src/crc32.h src/crc32.cpp
 	src/EHandle.h src/EHandle.cpp
 	src/ThreadSafeQueue.h src/ThreadSafeQueue.cpp
 	src/mstream.h src/mstream.cpp
 )
 
 include_directories(src)
+include_directories(include)
 include_directories(include/metamod)
 include_directories(include/hlsdk/common)
 include_directories(include/hlsdk/dlls)
 include_directories(include/hlsdk/engine)
 include_directories(include/hlsdk/pm_shared)
+link_directories(lib)
 
 add_library(${PROJECT_NAME} SHARED ${SOURCE_FILES})
 
@@ -41,10 +46,17 @@ if(MSVC)
 	add_custom_command(TARGET ${PROJECT_NAME}  PRE_BUILD
 		COMMAND ${CMAKE_CURRENT_LIST_DIR}/replace_dll.bat
 	)
+	
+	target_link_libraries(${PROJECT_NAME}
+		${CMAKE_CURRENT_LIST_DIR}/lib/opus.lib
+		${CMAKE_SOURCE_DIR}/lib/zita-resampler.lib
+	)
 
 else()
 	target_compile_definitions(${PROJECT_NAME} PUBLIC -Dlinux)
 	set(CMAKE_CXX_FLAGS "-Wall -std=c++11 -m32 -g")
 	set(CMAKE_CXX_FLAGS_DEBUG "-O0")
 	set(CMAKE_CXX_FLAGS_RELEASE "-Os -w -Wfatal-errors")
+	
+	target_link_libraries(${PROJECT_NAME} -lopus -lpthread ${CMAKE_SOURCE_DIR}/lib/libzita-resampler.a)
 endif()

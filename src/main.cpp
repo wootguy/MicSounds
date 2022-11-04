@@ -26,12 +26,26 @@ plugin_info_t Plugin_info = {
 bool g_admin_pause_packets = false;
 volatile bool g_plugin_exiting = false;
 
+
 void PluginInit() {
 	g_plugin_exiting = false;
 
 	g_dll_hooks.pfnStartFrame = StartFrame;
 
+	REG_SVR_COMMAND("mic_sound", mic_sound);
+
 	g_main_thread_id = std::this_thread::get_id();
+}
+
+void mic_sound() {
+	CommandArgs args = CommandArgs();
+	args.loadArgs();
+
+	string wantSound = args.ArgV(1);
+
+	println("Zomg play sound: %s", wantSound.c_str());
+
+	return;
 }
 
 void handleThreadPrints() {
