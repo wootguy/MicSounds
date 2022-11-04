@@ -1,7 +1,8 @@
+#pragma once
+#include <extdll.h>
 #include <map>
 #include <vector>
 #include <string>
-#include <fstream>
 #include <thread>
 #include "SteamVoiceEncoder.h"
 #include "ThreadSafeQueue.h"
