@@ -4,6 +4,7 @@
 void MapInit(edict_t* pEdictList, int edictCount, int maxClients);
 void StartFrame();
 void mic_sound();
+void ClientLeave(edict_t* plr);
 void stop_mic_sound();
 void config_mic_sound();
 

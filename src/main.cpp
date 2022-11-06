@@ -29,6 +29,7 @@ void PluginInit() {
 
 	g_dll_hooks.pfnServerActivate = MapInit;
 	g_dll_hooks.pfnStartFrame = StartFrame;
+	g_dll_hooks.pfnClientDisconnect = ClientLeave;
 
 	REG_SVR_COMMAND("play_mic_sound", mic_sound);
 	REG_SVR_COMMAND("stop_mic_sound", stop_mic_sound);
@@ -43,11 +44,17 @@ void PluginInit() {
 	crc32_init();
 }
 
+void ClientLeave(edict_t* plr) {
+	g_soundConverters[ENTINDEX(plr)-1]->listeners = 0;
+}
+
 void MapInit(edict_t* pEdictList, int edictCount, int maxClients) {
 	// reset reliable flags to prevent desyncs/overflows when joining the game
 	// the angelscript plugin should reconfigure with a delay
+	// also stop all sounds
 	for (int i = 0; i < gpGlobals->maxClients; i++) {
 		g_soundConverters[i]->reliable = 0;
+		g_soundConverters[i]->listeners = 0;
 	}
 }
 
