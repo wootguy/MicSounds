@@ -21,8 +21,12 @@ plugin_info_t Plugin_info = {
 
 bool g_admin_pause_packets = false;
 volatile bool g_plugin_exiting = false;
+volatile float g_attenuation = 0.033f;
+volatile bool g_attenuation_enabled = true;
 
 ChatSoundConverter* g_soundConverters[MAX_PLAYERS];
+PlayerInfo g_playerInfo[32];
+mutex playerInfoMutex;
 
 void PluginInit() {
 	g_plugin_exiting = false;
@@ -34,11 +38,14 @@ void PluginInit() {
 	REG_SVR_COMMAND("play_mic_sound", mic_sound);
 	REG_SVR_COMMAND("stop_mic_sound", stop_mic_sound);
 	REG_SVR_COMMAND("config_mic_sound", config_mic_sound);
+	REG_SVR_COMMAND("mic_sound_attn", mic_sound_attn);
 
 	g_main_thread_id = std::this_thread::get_id();
-	
+	memset(g_playerInfo, 0, sizeof(PlayerInfo));
+
 	for (int i = 0; i < MAX_PLAYERS; i++) {
 		g_soundConverters[i] = new ChatSoundConverter(i+1);
+		g_playerInfo[i].volume = 1.0f;
 	}
 
 	crc32_init();
@@ -46,6 +53,7 @@ void PluginInit() {
 
 void ClientLeave(edict_t* plr) {
 	g_soundConverters[ENTINDEX(plr)-1]->listeners = 0;
+	RETURN_META(MRES_IGNORED);
 }
 
 void MapInit(edict_t* pEdictList, int edictCount, int maxClients) {
@@ -53,8 +61,29 @@ void MapInit(edict_t* pEdictList, int edictCount, int maxClients) {
 	// the angelscript plugin should reconfigure with a delay
 	// also stop all sounds
 	for (int i = 0; i < gpGlobals->maxClients; i++) {
-		g_soundConverters[i]->reliable = 0;
+		g_playerInfo[i].connected = false;
 		g_soundConverters[i]->listeners = 0;
+	}
+
+	RETURN_META(MRES_IGNORED);
+}
+
+void mic_sound_attn() {
+	CommandArgs args = CommandArgs();
+	args.loadArgs();
+
+	float attn = atof(args.ArgV(1).c_str());
+
+	g_attenuation_enabled = attn > 0;
+	g_attenuation = attn;
+
+	if (g_attenuation_enabled) {
+		println("MicSound Attenuation set to %f", g_attenuation);
+		logln("MicSound Attenuation set to %f", g_attenuation);
+	}
+	else {
+		println("MicSound Attenuation disabled");
+		logln("MicSound Attenuation disabled");
 	}
 }
 
@@ -63,12 +92,23 @@ void config_mic_sound() {
 	args.loadArgs();
 
 	// bitfield indicated which players get reliable packets
-	uint32_t reliableMode = strtoul(args.ArgV(1).c_str(), NULL, 10);
-	println("[MicSounds] set reliable bits %u from %s", reliableMode, args.ArgV(1).c_str());
+	int playerIdx = atoi(args.ArgV(1).c_str());
+	bool reliableMode = atoi(args.ArgV(2).c_str()) != 0;
+	bool globalMode = atoi(args.ArgV(3).c_str()) != 0;
+	float volume = atoi(args.ArgV(4).c_str()) / 100.0f;
+	println("[MicSounds] config player %d %d %d %f", playerIdx, (int)reliableMode, (int)globalMode, volume);
 
-	for (int i = 0; i < gpGlobals->maxClients; i++) {
-		g_soundConverters[i]->reliable = reliableMode;
-	}
+	int converterIdx = playerIdx - 1;
+	if (converterIdx < 0 || converterIdx >= gpGlobals->maxClients) {
+		println("Bad player index!");
+		return;
+	}	
+
+	playerInfoMutex.lock();
+	g_playerInfo[converterIdx].reliableMode = reliableMode;
+	g_playerInfo[converterIdx].globalMode = globalMode;
+	g_playerInfo[converterIdx].volume = volume;
+	playerInfoMutex.unlock();
 }
 
 void stop_mic_sound() {
@@ -134,7 +174,8 @@ void mic_sound() {
 	int converterIdx = playerIdx - 1;
 
 	g_soundConverters[converterIdx]->commands.enqueue(cmd);
-	g_soundConverters[converterIdx]->outPackets.clear();
+	for (int i = 0; i < gpGlobals->maxClients; i++)
+		g_soundConverters[converterIdx]->outPackets[i].clear();
 	g_soundConverters[converterIdx]->listeners = listeners;
 
 	println("[MicSounds] Play %s %d %d %u", fpath.c_str(), pitch, volume, listeners);
@@ -166,6 +207,14 @@ void handleThreadPrints() {
 void StartFrame() {
 	g_Scheduler.Think();
 	handleThreadPrints();
+
+	playerInfoMutex.lock();
+	for (int i = 1; i <= gpGlobals->maxClients; i++) {
+		edict_t* plr = INDEXENT(i);
+		g_playerInfo[i-1].connected = isValidPlayer(plr);
+		g_playerInfo[i-1].pos = *(vec3*)&(plr->v.origin);
+	}
+	playerInfoMutex.unlock();
 
 	
 	for (int i = 0; i < MAX_PLAYERS; i++) {

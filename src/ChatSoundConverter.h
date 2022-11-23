@@ -8,6 +8,7 @@
 #include "ThreadSafeQueue.h"
 #include "misc_utils.h"
 #include "zita-resampler/resampler.h"
+#include "main.h"
 
 const uint64_t steamid64_min = 0x0110000100000001;
 const uint64_t steamid64_max = 0x01100001FFFFFFFF;
@@ -31,14 +32,15 @@ struct VoicePacket {
 
 struct ChatSoundConverter {
 public:
-	ThreadSafeQueue<VoicePacket> outPackets;
+	ThreadSafeQueue<VoicePacket> outPackets[MAX_PLAYERS];
 	ThreadSafeQueue<std::string> commands;
 	ThreadSafeQueue<std::string> errors;
+
+	PlayerInfo playerInfoCopy[MAX_PLAYERS]; // thread copy of global data
 	
 	// only write these vars from main thread
 	volatile bool exitSignal = false;
 	uint32_t listeners = 0xffffffff; // 1 bit = player is listener
-	uint32_t reliable = 0; // 1 bit = player has reliable packets enabled
 	float playbackStartTime = 0;
 	float nextPacketTime = 0;
 	int packetNum = 0;
@@ -84,7 +86,8 @@ private:
 	float* rateBufferIn;
 	float* rateBufferOut;
 	bool startingNewSound;
+	int16_t* volumeBuffer;
 	
 	vector<int16_t> encodeBuffer; // samples ready to be encoded
-	SteamVoiceEncoder* encoder;
+	SteamVoiceEncoder* encoder[MAX_PLAYERS];
 };

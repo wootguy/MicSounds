@@ -18,6 +18,7 @@ SteamVoiceEncoder::SteamVoiceEncoder(int frameSize, int framesPerPacket, int sam
 	int err = 0;
 	encoder = opus_encoder_create(sampleRate, 1, encodeMode, &err);
 	opus_encoder_ctl(encoder, OPUS_SET_BITRATE(bitrate));
+	opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(0)); // low quality but 2x faster encode time
 
 	if (err != OPUS_OK) {
 		fprintf(stderr, "Failed to create opus encoder %d\n", err);

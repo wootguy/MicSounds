@@ -17,6 +17,7 @@ set(SOURCE_FILES
 	src/EHandle.h src/EHandle.cpp
 	src/ThreadSafeQueue.h src/ThreadSafeQueue.cpp
 	src/mstream.h src/mstream.cpp
+	src/vectors.h src/vectors.cpp
 )
 
 include_directories(src)
