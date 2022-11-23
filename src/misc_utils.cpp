@@ -1,6 +1,8 @@
 #include "misc_utils.h"
 #include "zita-resampler/resampler.h"
 
+using namespace std;
+
 string getFileExtension(string fpath) {
 	int dot = fpath.find_last_of(".");
 	if (dot != -1 && dot < fpath.size()-1) {

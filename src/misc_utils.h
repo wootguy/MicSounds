@@ -1,5 +1,8 @@
 #pragma once
-#include "main.h"
+#include "meta_init.h"
+#include <string>
+#include <vector>
+#include "vectors.h"
 
 typedef struct WAV_HEADER {
 	/* RIFF Chunk Descriptor */
@@ -21,26 +24,26 @@ typedef struct WAV_HEADER {
 	uint32_t Subchunk2Size;                        // Sampled data length
 } wav_hdr;
 
-string replaceString(string subject, string search, string replace);
+std::string replaceString(std::string subject, std::string search, std::string replace);
 
-edict_t* getPlayerByUniqueId(string id);
+edict_t* getPlayerByUniqueId(std::string id);
 
 // user IDs change every time a user connects to the server
 edict_t* getPlayerByUserId(int id);
 
-string getPlayerUniqueId(edict_t* plr);
+std::string getPlayerUniqueId(edict_t* plr);
 
 bool isValidPlayer(edict_t* plr);
 
-void clientCommand(edict_t* plr, string cmd, int destType = MSG_ONE);
+void clientCommand(edict_t* plr, std::string cmd, int destType = MSG_ONE);
 
-string trimSpaces(string s);
+std::string trimSpaces(std::string s);
 
-bool cgetline(FILE* file, string& output);
+bool cgetline(FILE* file, std::string& output);
 
-string formatTime(int totalSeconds);
+std::string formatTime(int totalSeconds);
 
-vector<string> splitString(string str, const char* delimitters);
+std::vector<std::string> splitString(std::string str, const char* delimitters);
 
 uint32_t getFileSize(FILE* file);
 
@@ -48,7 +51,7 @@ float clampf(float val, float min, float max);
 
 int clamp(int val, int min, int max);
 
-string getFileExtension(string fpath);
+std::string getFileExtension(std::string fpath);
 
 bool fileExists(const std::string& name);
 
@@ -58,4 +61,4 @@ int mixStereoToMono(int16_t* pcm, int numSamples);
 // fast resample without pitch correction
 int resamplePcm(int16_t* pcm_old, int16_t* pcm_new, int oldRate, int newRate, int numSamples);
 
-uint64_t steamid_to_steamid64(string steamid);
+uint64_t steamid_to_steamid64(std::string steamid);

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <thread>
 #include <string.h>
+#include "main.h"
 
 #undef read
 #undef write
@@ -24,9 +25,13 @@ ChatSoundConverter::ChatSoundConverter(int playerIdx) {
 	readBuffer = new uint8_t[STREAM_BUFFER_SIZE];
 	rateBufferIn = new float[STREAM_BUFFER_SIZE];
 	rateBufferOut = new float[STREAM_BUFFER_SIZE];
+	volumeBuffer = new int16_t[samplesPerPacket];
 
 	this->playerIdx = playerIdx;
-	encoder = new SteamVoiceEncoder(frameSize, framesPerPacket, sampleRate, opusBitrate, OPUS_APPLICATION_AUDIO);
+
+	for (int i = 0; i < MAX_PLAYERS; i++) {
+		encoder[i] = new SteamVoiceEncoder(frameSize, framesPerPacket, sampleRate, opusBitrate, OPUS_APPLICATION_AUDIO);
+	}
 
 	thinkThread = NULL;
 	#ifndef SINGLE_THREAD_MODE
@@ -41,11 +46,14 @@ ChatSoundConverter::~ChatSoundConverter() {
 		thinkThread->join();
 		delete thinkThread;
 	}
-	delete encoder;
+	for (int i = 0; i < MAX_PLAYERS; i++) {
+		delete encoder[i];
+	}	
 
 	delete[] readBuffer;
 	delete[] rateBufferIn;
 	delete[] rateBufferOut;
+	delete[] volumeBuffer;
 }
 
 void ChatSoundConverter::play_samples() {
@@ -64,12 +72,22 @@ void ChatSoundConverter::play_samples() {
 		return;
 	}
 
-	VoicePacket packet;
-	if (!outPackets.dequeue(packet)) {
+	static VoicePacket packets[MAX_PLAYERS];
+
+	if (outPackets[0].size() == 0) {
 		return;
 	}
 
-	if (packet.isNewSound) {
+	if (g_attenuation_enabled) {
+		for (int i = 0; i < gpGlobals->maxClients; i++) {
+			outPackets[i].dequeue(packets[i]);
+		}
+	}
+	else {
+		outPackets[0].dequeue(packets[0]);
+	}
+
+	if (packets[0].isNewSound) {
 		packetNum = 0;
 		playbackStartTime = g_engfuncs.pfnTime();
 	}
@@ -77,6 +95,7 @@ void ChatSoundConverter::play_samples() {
 	for (int i = 1; i <= gpGlobals->maxClients; i++) {
 		edict_t* plr = INDEXENT(i);
 		uint32_t plrBit = 1 << (i & 31);
+		VoicePacket& packet = packets[g_attenuation_enabled ? i-1 : 0];
 
 		if (!isValidPlayer(plr)) {
 			continue;
@@ -86,7 +105,11 @@ void ChatSoundConverter::play_samples() {
 			continue;
 		}
 
-		bool reliablePackets = reliable & plrBit;
+		if (packet.size == 0) {
+			continue;
+		}
+
+		bool reliablePackets = g_playerInfo[i-1].reliableMode;
 		int sendMode = reliablePackets ? MSG_ONE : MSG_ONE_UNRELIABLE;
 
 		// svc_voicedata
@@ -176,7 +199,8 @@ void ChatSoundConverter::handleCommand(string cmd) {
 	resampler.out_data = rateBufferOut;
 	encodeBuffer.clear();
 	startingNewSound = true;
-	encoder->reset();
+	for (int i = 0; i < MAX_PLAYERS; i++)
+		encoder[i]->reset();
 }
 
 void ChatSoundConverter::think() {
@@ -192,7 +216,7 @@ void ChatSoundConverter::think() {
 			handleCommand(cmd);
 		}
 
-		while (!exitSignal && (outPackets.size() < IDEAL_BUFFER_SIZE) && (soundFile || encodeBuffer.size())) {
+		while (!exitSignal && (outPackets[0].size() < IDEAL_BUFFER_SIZE) && (soundFile || encodeBuffer.size())) {
 			write_output_packet();
 		}
 	}
@@ -280,47 +304,92 @@ void ChatSoundConverter::write_output_packet() {
 		}
 	}
 
-	vector<uint8_t> bytes = encoder->write_steam_voice_packet(&encodeBuffer[0], samplesPerPacket, steamid64);
-	encodeBuffer.erase(encodeBuffer.begin(), encodeBuffer.begin() + samplesPerPacket);
+	if (g_attenuation_enabled) {
+		playerInfoMutex.lock();
+		memcpy(playerInfoCopy, g_playerInfo, sizeof(PlayerInfo) * MAX_PLAYERS);
+		playerInfoMutex.unlock();
+	}
 
-	VoicePacket packet;
-	packet.size = 0;
+	vec3 speakerPos = playerInfoCopy[playerIdx-1].pos;
+	
+	for (int i = 0; i < gpGlobals->maxClients; i++) {
+		vector<uint8_t> bytes;
+		VoicePacket packet;
+		packet.size = 0;
 
-	string sdat = "";
-
-	for (int x = 0; x < bytes.size(); x++) {
-		byte bval = bytes[x];
-		packet.data.push_back(bval);
-
-		// combine into 32bit ints for faster writing later
-		if (packet.data.size() == 4) {
-			uint32 val = (packet.data[3] << 24) + (packet.data[2] << 16) + (packet.data[1] << 8) + packet.data[0];
-			packet.ldata.push_back(val);
-			packet.data.resize(0);
+		if (startingNewSound) {
+			packet.isNewSound = true;
+			startingNewSound = false;
 		}
 
-		// combine into string for even faster writing later
-		if (bval == 0) {
-			packet.sdata.push_back(sdat);
-			packet.ldata.resize(0);
-			packet.data.resize(0);
-			sdat = "";
+		if (g_attenuation_enabled) {
+			if (!playerInfoCopy[i].connected) {
+				outPackets[i].enqueue(packet);
+				encoder[i]->reset();
+				continue;
+			}
+
+			float distance = (speakerPos - playerInfoCopy[i].pos).length();
+			float volume = max(0.0f, 1.0f - distance * g_attenuation*0.01f);
+			volume = volume * volume * playerInfoCopy[i].volume; // exponential falloff
+
+			if (playerInfoCopy[i].globalMode) {
+				volume = playerInfoCopy[i].volume;
+			}
+
+			if (volume < 0.01f || !playerInfoCopy[i].connected) {
+				outPackets[i].enqueue(packet);
+				encoder[i]->reset();
+				continue;
+			}			
+
+			for (int k = 0; k < samplesPerPacket; k++) {
+				volumeBuffer[k] = encodeBuffer[k] * volume;
+			}
+
+			bytes = encoder[i]->write_steam_voice_packet(volumeBuffer, samplesPerPacket, steamid64);
 		}
 		else {
-			sdat += (char)bval;
+			bytes = encoder[i]->write_steam_voice_packet(&encodeBuffer[0], samplesPerPacket, steamid64);
+		}
+
+		string sdat = "";
+
+		for (int x = 0; x < bytes.size(); x++) {
+			byte bval = bytes[x];
+			packet.data.push_back(bval);
+
+			// combine into 32bit ints for faster writing later
+			if (packet.data.size() == 4) {
+				uint32 val = (packet.data[3] << 24) + (packet.data[2] << 16) + (packet.data[1] << 8) + packet.data[0];
+				packet.ldata.push_back(val);
+				packet.data.resize(0);
+			}
+
+			// combine into string for even faster writing later
+			if (bval == 0) {
+				packet.sdata.push_back(sdat);
+				packet.ldata.resize(0);
+				packet.data.resize(0);
+				sdat = "";
+			}
+			else {
+				sdat += (char)bval;
+			}
+		}
+
+		packet.size = bytes.size();
+
+		//println("Write %d samples with %d left. %d packets in queue", samplesPerPacket, encodeBuffer.size(), outPackets.size());
+
+		outPackets[i].enqueue(packet);
+
+		if (!g_attenuation_enabled) {
+			break;
 		}
 	}
 
-	packet.size = bytes.size();
-	
-	if (startingNewSound) {
-		packet.isNewSound = true;
-		startingNewSound = false;
-	}
-
-	//println("Write %d samples with %d left. %d packets in queue", samplesPerPacket, encodeBuffer.size(), outPackets.size());
-
-	outPackets.enqueue(packet);
+	encodeBuffer.erase(encodeBuffer.begin(), encodeBuffer.begin() + samplesPerPacket);
 }
 
 FILE* ChatSoundConverter::open_sound_file(string path) {
