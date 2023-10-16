@@ -310,7 +310,7 @@ void ChatSoundConverter::write_output_packet() {
 		playerInfoMutex.unlock();
 	}
 
-	vec3 speakerPos = playerInfoCopy[playerIdx-1].pos;
+	Vector speakerPos = playerInfoCopy[playerIdx-1].pos;
 	
 	for (int i = 0; i < gpGlobals->maxClients; i++) {
 		vector<uint8_t> bytes;
@@ -329,7 +329,7 @@ void ChatSoundConverter::write_output_packet() {
 				continue;
 			}
 
-			float distance = (speakerPos - playerInfoCopy[i].pos).length();
+			float distance = (speakerPos - playerInfoCopy[i].pos).Length();
 			float volume = max(0.0f, 1.0f - distance * g_attenuation*0.01f);
 			volume = volume * volume * playerInfoCopy[i].volume; // exponential falloff
 
