@@ -12,7 +12,7 @@ void toggle_mic_sound_mode();
 void mic_sound_attn();
 
 struct PlayerInfo {
-	vec3 pos;
+	Vector pos;
 	bool connected;
 	bool reliableMode; // only read/write by main thread
 	bool globalMode;
@@ -25,3 +25,5 @@ extern PlayerInfo g_playerInfo[MAX_PLAYERS];
 extern std::mutex playerInfoMutex;
 extern volatile float g_attenuation;
 extern volatile bool g_attenuation_enabled;
+
+using namespace std;

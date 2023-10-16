@@ -1,6 +1,6 @@
 #include "main.h"
 #include <string>
-#include "misc_utils.h"
+#include "mmlib.h"
 #include "ChatSoundConverter.h"
 #include "crc32.h"
 
@@ -183,27 +183,6 @@ void mic_sound() {
 	return;
 }
 
-void handleThreadPrints() {
-	string msg;
-	for (int failsafe = 0; failsafe < 10; failsafe++) {
-		if (g_thread_prints.dequeue(msg)) {
-			println(msg.c_str());
-		}
-		else {
-			break;
-		}
-	}
-
-	for (int failsafe = 0; failsafe < 10; failsafe++) {
-		if (g_thread_logs.dequeue(msg)) {
-			logln(msg.c_str());
-		}
-		else {
-			break;
-		}
-	}
-}
-
 void StartFrame() {
 	g_Scheduler.Think();
 	handleThreadPrints();
@@ -212,7 +191,7 @@ void StartFrame() {
 	for (int i = 1; i <= gpGlobals->maxClients; i++) {
 		edict_t* plr = INDEXENT(i);
 		g_playerInfo[i-1].connected = isValidPlayer(plr);
-		g_playerInfo[i-1].pos = *(vec3*)&(plr->v.origin);
+		g_playerInfo[i-1].pos = *(Vector*)&(plr->v.origin);
 	}
 	playerInfoMutex.unlock();
 
