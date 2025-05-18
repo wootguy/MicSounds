@@ -1,15 +1,10 @@
 #pragma once
-#include "meta_utils.h"
-#include "misc_utils.h"
+#include "extdll.h"
+#include "util.h"
 
-void MapInit(edict_t* pEdictList, int edictCount, int maxClients);
-void StartFrame();
-void mic_sound();
-void ClientLeave(edict_t* plr);
-void stop_mic_sound();
-void config_mic_sound();
-void toggle_mic_sound_mode();
-void mic_sound_attn();
+#define MAX_PLAYERS 32
+#define println(fmt, ...) ALERT(at_console, fmt "\n", ##__VA_ARGS__)
+#define logln(fmt, ...) ALERT(at_logged, fmt "\n", ##__VA_ARGS__)
 
 struct PlayerInfo {
 	Vector pos;
