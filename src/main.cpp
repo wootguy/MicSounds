@@ -1,23 +1,13 @@
 #include "main.h"
+#include "PluginHooks.h"
+#include "PluginManager.h"
 #include <string>
-#include "mmlib.h"
 #include "ChatSoundConverter.h"
+#include "CBasePlayer.h"
+#include "Scheduler.h"
 #include "crc32.h"
 
 using namespace std;
-
-// Description of plugin
-plugin_info_t Plugin_info = {
-	META_INTERFACE_VERSION,	// ifvers
-	"MicSounds",	// name
-	"1.0",	// version
-	__DATE__,	// date
-	"w00tguy",	// author
-	"https://github.com/wootguy/",	// url
-	"MICSND",	// logtag, all caps please
-	PT_ANYTIME,	// (when) loadable
-	PT_ANYPAUSE,	// (when) unloadable
-};
 
 bool g_admin_pause_packets = false;
 volatile bool g_plugin_exiting = false;
@@ -28,35 +18,12 @@ ChatSoundConverter* g_soundConverters[MAX_PLAYERS];
 PlayerInfo g_playerInfo[32];
 mutex playerInfoMutex;
 
-void PluginInit() {
-	g_plugin_exiting = false;
-
-	g_dll_hooks.pfnServerActivate = MapInit;
-	g_dll_hooks.pfnStartFrame = StartFrame;
-	g_dll_hooks.pfnClientDisconnect = ClientLeave;
-
-	REG_SVR_COMMAND("play_mic_sound", mic_sound);
-	REG_SVR_COMMAND("stop_mic_sound", stop_mic_sound);
-	REG_SVR_COMMAND("config_mic_sound", config_mic_sound);
-	REG_SVR_COMMAND("mic_sound_attn", mic_sound_attn);
-
-	g_main_thread_id = std::this_thread::get_id();
-	memset(g_playerInfo, 0, sizeof(PlayerInfo));
-
-	for (int i = 0; i < MAX_PLAYERS; i++) {
-		g_soundConverters[i] = new ChatSoundConverter(i+1);
-		g_playerInfo[i].volume = 1.0f;
-	}
-
-	crc32_init();
+HOOK_RETURN_DATA ClientLeave(CBasePlayer* plr) {
+	g_soundConverters[plr->entindex() - 1]->listeners = 0;
+	return HOOK_CONTINUE;
 }
 
-void ClientLeave(edict_t* plr) {
-	g_soundConverters[ENTINDEX(plr)-1]->listeners = 0;
-	RETURN_META(MRES_IGNORED);
-}
-
-void MapInit(edict_t* pEdictList, int edictCount, int maxClients) {
+HOOK_RETURN_DATA MapInit() {
 	// reset reliable flags to prevent desyncs/overflows when joining the game
 	// the angelscript plugin should reconfigure with a delay
 	// also stop all sounds
@@ -65,13 +32,10 @@ void MapInit(edict_t* pEdictList, int edictCount, int maxClients) {
 		g_soundConverters[i]->listeners = 0;
 	}
 
-	RETURN_META(MRES_IGNORED);
+	return HOOK_CONTINUE;
 }
 
-void mic_sound_attn() {
-	CommandArgs args = CommandArgs();
-	args.loadArgs();
-
+bool mic_sound_attn(CBasePlayer* plr, const CommandArgs& args) {
 	float attn = atof(args.ArgV(1).c_str());
 
 	g_attenuation_enabled = attn > 0;
@@ -85,23 +49,22 @@ void mic_sound_attn() {
 		println("MicSound Attenuation disabled");
 		logln("MicSound Attenuation disabled");
 	}
+
+	return true;
 }
 
-void config_mic_sound() {
-	CommandArgs args = CommandArgs();
-	args.loadArgs();
-
+bool config_mic_sound(CBasePlayer* plr, const CommandArgs& args) {
 	// bitfield indicated which players get reliable packets
 	int playerIdx = atoi(args.ArgV(1).c_str());
 	bool reliableMode = atoi(args.ArgV(2).c_str()) != 0;
 	bool globalMode = atoi(args.ArgV(3).c_str()) != 0;
 	float volume = atoi(args.ArgV(4).c_str()) / 100.0f;
-	println("[MicSounds] config player %d %d %d %f", playerIdx, (int)reliableMode, (int)globalMode, volume);
+	println("config player %d %d %d %f", playerIdx, (int)reliableMode, (int)globalMode, volume);
 
 	int converterIdx = playerIdx - 1;
 	if (converterIdx < 0 || converterIdx >= gpGlobals->maxClients) {
 		println("Bad player index!");
-		return;
+		return true;
 	}	
 
 	playerInfoMutex.lock();
@@ -109,40 +72,38 @@ void config_mic_sound() {
 	g_playerInfo[converterIdx].globalMode = globalMode;
 	g_playerInfo[converterIdx].volume = volume;
 	playerInfoMutex.unlock();
+
+	return true;
 }
 
-void stop_mic_sound() {
-	CommandArgs args = CommandArgs();
-	args.loadArgs();
-
+bool stop_mic_sound(CBasePlayer* plr, const CommandArgs& args) {
 	int playerIdx = atoi(args.ArgV(1).c_str());
 	bool stopForEveryone = atoi(args.ArgV(2).c_str()) > 0;
 
 	if (playerIdx < 1 || playerIdx > gpGlobals->maxClients) {
-		println("[MicSounds] Invalid client index");
-		return;
+		println("Invalid client index");
+		return true;
 	}
 
 	if (stopForEveryone) {
 		g_soundConverters[playerIdx - 1]->listeners = 0;
-		println("[MicSounds] Stop sound from player %d", playerIdx);
+		println("Stop sound from player %d", playerIdx);
 	}
 	else {
 		uint32_t plrBit = 1 << (playerIdx & 31);
-		println("[MicSounds] Stop sounds for player %d", playerIdx);
+		println("Stop sounds for player %d", playerIdx);
 
 		for (int i = 0; i < gpGlobals->maxClients; i++) {
 			g_soundConverters[i]->listeners &= ~plrBit;
 		}
 	}
+
+	return true;
 }
 
 
 // test command: play_mic_sound twlz/poney.wav 100 22 1 2
-void mic_sound() {
-	CommandArgs args = CommandArgs();
-	args.loadArgs();
-
+bool mic_sound(CBasePlayer* plr, const CommandArgs& args) {
 	string wantSound = args.ArgV(1);
 
 	string fpath = args.ArgV(1);
@@ -152,22 +113,22 @@ void mic_sound() {
 	uint32_t listeners = strtoul(args.ArgV(5).c_str(), NULL, 10);
 
 	if (playerIdx < 1 || playerIdx > gpGlobals->maxClients) {
-		println("[MicSounds] invalid player idx");
-		return;
+		println("invalid player idx");
+		return true;
 	}
 
-	edict_t* plr = INDEXENT(playerIdx);
+	edict_t* eplr = INDEXENT(playerIdx);
 
-	if (!isValidPlayer(plr)) {
-		println("[MicSounds] invalid player");
-		return;
+	if (!IsValidPlayer(eplr)) {
+		println("invalid player");
+		return true;
 	}
 
-	string steamid = (*g_engfuncs.pfnGetPlayerAuthId)(plr);
+	string steamid = (*g_engfuncs.pfnGetPlayerAuthId)(eplr);
 	uint64_t steamid64 = steamid64_min + playerIdx;
 
 	if (steamid != "STEAM_ID_LAN" && steamid != "BOT") {
-		steamid64 = steamid_to_steamid64(steamid);
+		steamid64 = steamid_to_steamid64(steamid.c_str());
 	}
 
 	string cmd = UTIL_VarArgs("%s?%d?%d?%llu", fpath.c_str(), pitch, volume, steamid64);
@@ -178,19 +139,18 @@ void mic_sound() {
 		g_soundConverters[converterIdx]->outPackets[i].clear();
 	g_soundConverters[converterIdx]->listeners = listeners;
 
-	println("[MicSounds] Play %s %d %d %u", fpath.c_str(), pitch, volume, listeners);
+	println("Play %s %d %d %u", fpath.c_str(), pitch, volume, listeners);
 
-	return;
+	return true;
 }
 
-void StartFrame() {
-	g_Scheduler.Think();
+HOOK_RETURN_DATA StartFrame() {
 	handleThreadPrints();
 
 	playerInfoMutex.lock();
 	for (int i = 1; i <= gpGlobals->maxClients; i++) {
 		edict_t* plr = INDEXENT(i);
-		g_playerInfo[i-1].connected = isValidPlayer(plr);
+		g_playerInfo[i-1].connected = IsValidPlayer(plr);
 		g_playerInfo[i-1].pos = *(Vector*)&(plr->v.origin);
 	}
 	playerInfoMutex.unlock();
@@ -204,14 +164,41 @@ void StartFrame() {
 
 		string err;
 		if (g_soundConverters[i]->errors.dequeue(err)) {
-			ClientPrintAll(HUD_PRINTNOTIFY, err.c_str());
+			UTIL_ClientPrintAll(print_console, err.c_str());
 		}
 	}
 
-	RETURN_META(MRES_IGNORED);
+	return HOOK_CONTINUE;
 }
 
-void PluginExit() {
+HLCOOP_PLUGIN_HOOKS g_hooks;
+
+extern "C" int DLLEXPORT PluginInit() {
+	g_plugin_exiting = false;
+
+	g_hooks.pfnMapInit = MapInit;
+	g_hooks.pfnStartFrame = StartFrame;
+	g_hooks.pfnClientDisconnect = ClientLeave;
+
+	RegisterPluginCommand("play_mic_sound", mic_sound, FL_CMD_SERVER);
+	RegisterPluginCommand("stop_mic_sound", stop_mic_sound, FL_CMD_SERVER);
+	RegisterPluginCommand("config_mic_sound", config_mic_sound, FL_CMD_SERVER);
+	RegisterPluginCommand("mic_sound_attn", mic_sound_attn, FL_CMD_SERVER);
+
+	g_main_thread_id = std::this_thread::get_id();
+	memset(g_playerInfo, 0, sizeof(PlayerInfo));
+
+	for (int i = 0; i < MAX_PLAYERS; i++) {
+		g_soundConverters[i] = new ChatSoundConverter(i + 1);
+		g_playerInfo[i].volume = 1.0f;
+	}
+
+	crc32_init();
+
+	return RegisterPlugin(&g_hooks);
+}
+
+extern "C" void DLLEXPORT PluginExit() {
 	g_plugin_exiting = true;
 
 	for (int i = 0; i < MAX_PLAYERS; i++) {

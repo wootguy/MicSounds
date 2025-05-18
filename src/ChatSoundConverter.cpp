@@ -1,5 +1,4 @@
 #include "ChatSoundConverter.h"
-#include "misc_utils.h"
 #include <chrono>
 #include <thread>
 #include <string.h>
@@ -63,7 +62,7 @@ void ChatSoundConverter::play_samples() {
 
 	edict_t* plr = INDEXENT(playerIdx);
 
-	if (!isValidPlayer(plr)) {
+	if (!IsValidPlayer(plr)) {
 		listeners = 0;
 		return;
 	}
@@ -97,7 +96,7 @@ void ChatSoundConverter::play_samples() {
 		uint32_t plrBit = 1 << (i & 31);
 		VoicePacket& packet = packets[g_attenuation_enabled ? i-1 : 0];
 
-		if (!isValidPlayer(plr)) {
+		if (!IsValidPlayer(plr)) {
 			continue;
 		}
 
@@ -156,7 +155,7 @@ void ChatSoundConverter::handleCommand(string cmd) {
 	vector<string> parts = splitString(cmd, "?");
 
 	if (parts.size() < 4) {
-		println("[MicSounds] Invalid command '%s'", cmd.c_str());
+		println("Invalid command '%s'", cmd.c_str());
 		return;
 	}
 
@@ -394,9 +393,9 @@ void ChatSoundConverter::write_output_packet() {
 
 FILE* ChatSoundConverter::open_sound_file(string path) {
 	static vector<const char*> search_paths = {
-		"svencoop_addon/sound/",
-		"svencoop/sound/",
-		"svencoop_downloads/sound/",
+		"valve_addon/sound/",
+		"valve/sound/",
+		"valve_downloads/sound/",
 	};
 
 	for (int i = 0; i < search_paths.size(); i++) {
