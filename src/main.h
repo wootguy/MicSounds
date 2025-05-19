@@ -2,6 +2,8 @@
 #include "extdll.h"
 #include "util.h"
 
+//#define SINGLE_THREAD_MODE
+
 #define MAX_PLAYERS 32
 #define println(fmt, ...) ALERT(at_console, fmt "\n", ##__VA_ARGS__)
 #define logln(fmt, ...) ALERT(at_logged, fmt "\n", ##__VA_ARGS__)

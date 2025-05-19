@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.6)
 project(MicSounds)
 
 add_library(${PROJECT_NAME} SHARED
-	src/main.h src/main.cpp
+	src/main.h src/micsounds.cpp
 	src/ChatSoundConverter.h src/ChatSoundConverter.cpp
 	src/SteamVoiceEncoder.h src/SteamVoiceEncoder.cpp
 	src/crc32.h src/crc32.cpp

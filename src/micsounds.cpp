@@ -53,18 +53,14 @@ bool mic_sound_attn(CBasePlayer* plr, const CommandArgs& args) {
 	return true;
 }
 
-bool config_mic_sound(CBasePlayer* plr, const CommandArgs& args) {
-	// bitfield indicated which players get reliable packets
-	int playerIdx = atoi(args.ArgV(1).c_str());
-	bool reliableMode = atoi(args.ArgV(2).c_str()) != 0;
-	bool globalMode = atoi(args.ArgV(3).c_str()) != 0;
-	float volume = atoi(args.ArgV(4).c_str()) / 100.0f;
+APIFUNC void config_mic_sound(int playerIdx, bool reliableMode, bool globalMode, int vol) {
+	float volume = vol / 100.0f;
 	println("config player %d %d %d %f", playerIdx, (int)reliableMode, (int)globalMode, volume);
 
 	int converterIdx = playerIdx - 1;
 	if (converterIdx < 0 || converterIdx >= gpGlobals->maxClients) {
 		println("Bad player index!");
-		return true;
+		return;
 	}	
 
 	playerInfoMutex.lock();
@@ -72,17 +68,12 @@ bool config_mic_sound(CBasePlayer* plr, const CommandArgs& args) {
 	g_playerInfo[converterIdx].globalMode = globalMode;
 	g_playerInfo[converterIdx].volume = volume;
 	playerInfoMutex.unlock();
-
-	return true;
 }
 
-bool stop_mic_sound(CBasePlayer* plr, const CommandArgs& args) {
-	int playerIdx = atoi(args.ArgV(1).c_str());
-	bool stopForEveryone = atoi(args.ArgV(2).c_str()) > 0;
-
+APIFUNC void stop_mic_sound(int playerIdx, bool stopForEveryone) {
 	if (playerIdx < 1 || playerIdx > gpGlobals->maxClients) {
 		println("Invalid client index");
-		return true;
+		return;
 	}
 
 	if (stopForEveryone) {
@@ -97,31 +88,21 @@ bool stop_mic_sound(CBasePlayer* plr, const CommandArgs& args) {
 			g_soundConverters[i]->listeners &= ~plrBit;
 		}
 	}
-
-	return true;
 }
 
 
 // test command: play_mic_sound twlz/poney.wav 100 22 1 2
-bool mic_sound(CBasePlayer* plr, const CommandArgs& args) {
-	string wantSound = args.ArgV(1);
-
-	string fpath = args.ArgV(1);
-	int pitch = atoi(args.ArgV(2).c_str());
-	int volume = atoi(args.ArgV(3).c_str());
-	int playerIdx = atoi(args.ArgV(4).c_str());
-	uint32_t listeners = strtoul(args.ArgV(5).c_str(), NULL, 10);
-
+APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int playerIdx, uint32_t listeners) {
 	if (playerIdx < 1 || playerIdx > gpGlobals->maxClients) {
 		println("invalid player idx");
-		return true;
+		return;
 	}
 
 	edict_t* eplr = INDEXENT(playerIdx);
 
 	if (!IsValidPlayer(eplr)) {
 		println("invalid player");
-		return true;
+		return;
 	}
 
 	string steamid = (*g_engfuncs.pfnGetPlayerAuthId)(eplr);
@@ -131,7 +112,7 @@ bool mic_sound(CBasePlayer* plr, const CommandArgs& args) {
 		steamid64 = steamid_to_steamid64(steamid.c_str());
 	}
 
-	string cmd = UTIL_VarArgs("%s?%d?%d?%llu", fpath.c_str(), pitch, volume, steamid64);
+	string cmd = UTIL_VarArgs("%s?%d?%d?%llu", fpath, pitch, volume, steamid64);
 	int converterIdx = playerIdx - 1;
 
 	g_soundConverters[converterIdx]->commands.enqueue(cmd);
@@ -139,14 +120,10 @@ bool mic_sound(CBasePlayer* plr, const CommandArgs& args) {
 		g_soundConverters[converterIdx]->outPackets[i].clear();
 	g_soundConverters[converterIdx]->listeners = listeners;
 
-	println("Play %s %d %d %u", fpath.c_str(), pitch, volume, listeners);
-
-	return true;
+	println("Play %s %d %d %u", fpath, pitch, volume, listeners);
 }
 
 HOOK_RETURN_DATA StartFrame() {
-	handleThreadPrints();
-
 	playerInfoMutex.lock();
 	for (int i = 1; i <= gpGlobals->maxClients; i++) {
 		edict_t* plr = INDEXENT(i);
@@ -165,6 +142,7 @@ HOOK_RETURN_DATA StartFrame() {
 		string err;
 		if (g_soundConverters[i]->errors.dequeue(err)) {
 			UTIL_ClientPrintAll(print_console, err.c_str());
+			ALERT(at_console, err.c_str());
 		}
 	}
 
@@ -180,9 +158,6 @@ extern "C" int DLLEXPORT PluginInit() {
 	g_hooks.pfnStartFrame = StartFrame;
 	g_hooks.pfnClientDisconnect = ClientLeave;
 
-	RegisterPluginCommand("play_mic_sound", mic_sound, FL_CMD_SERVER);
-	RegisterPluginCommand("stop_mic_sound", stop_mic_sound, FL_CMD_SERVER);
-	RegisterPluginCommand("config_mic_sound", config_mic_sound, FL_CMD_SERVER);
 	RegisterPluginCommand("mic_sound_attn", mic_sound_attn, FL_CMD_SERVER);
 
 	g_main_thread_id = std::this_thread::get_id();
