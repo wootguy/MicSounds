@@ -1,5 +1,5 @@
 #pragma once
-#include <extdll.h>
+#include "main.h"
 #include <map>
 #include <vector>
 #include <string>
@@ -7,47 +7,23 @@
 #include "SteamVoiceEncoder.h"
 #include "ThreadSafeQueue.h"
 #include "zita-resampler/resampler.h"
-#include "main.h"
+#include "wav.h"
 
 const uint64_t steamid64_min = 0x0110000100000001;
 const uint64_t steamid64_max = 0x01100001FFFFFFFF;
 
 #define IDEAL_BUFFER_SIZE 8
 #define MAX_SOUND_SAMPLE_RATE 22050
-#define STREAM_BUFFER_SIZE 32768 // buffer size for file read bytes and sample rate conversion buffers
+#define STREAM_BUFFER_SIZE 16384 // buffer size for file read bytes and sample rate conversion buffers
 
 //#define SINGLE_THREAD_MODE // for easier debugging
 
 struct VoicePacket {
-	uint32_t size = 0;
 	bool isNewSound = false; // true if start of a new sound
-
-	std::vector<std::string> sdata;
-	std::vector<uint32_t> ldata;
 	std::vector<uint8_t> data;
 
 	VoicePacket() {}
 };
-
-typedef struct WAV_HEADER {
-	/* RIFF Chunk Descriptor */
-	uint8_t RIFF[4] = { 'R', 'I', 'F', 'F' }; // RIFF Header Magic header
-	uint32_t ChunkSize;                     // RIFF Chunk Size
-	uint8_t WAVE[4] = { 'W', 'A', 'V', 'E' }; // WAVE Header
-	/* "fmt" sub-chunk */
-	uint8_t fmt[4] = { 'f', 'm', 't', ' ' }; // FMT header
-	uint32_t Subchunk1Size = 16;           // Size of the fmt chunk
-	uint16_t AudioFormat = 1; // Audio format 1=PCM,6=mulaw,7=alaw,     257=IBM
-								// Mu-Law, 258=IBM A-Law, 259=ADPCM
-	uint16_t NumOfChan = 1;   // Number of channels 1=Mono 2=Sterio
-	uint32_t SamplesPerSec = 12000;   // Sampling Frequency in Hz
-	uint32_t bytesPerSec = 12000 * 2; // bytes per second
-	uint16_t blockAlign = 2;          // 2=16-bit mono, 4=16-bit stereo
-	uint16_t bitsPerSample = 16;      // Number of bits per sample
-	/* "data" sub-chunk */
-	uint8_t Subchunk2ID[4] = { 'd', 'a', 't', 'a' }; // "data"  string
-	uint32_t Subchunk2Size;                        // Sampled data length
-} wav_hdr;
 
 struct ChatSoundConverter {
 public:
@@ -72,7 +48,6 @@ public:
 	void think(); // don't call directly unless in single thread mode
 
 	void play_samples(); // only access from main thread
-	void calcNextPacketDelay();
 
 private:
 	// private vars only access from converter thread
@@ -83,6 +58,7 @@ private:
 	int packetDelay; // millesconds between output packets
 	int samplesPerPacket;
 	int opusBitrate; // 32kbps = steam default
+	int readSamplesLeft; // total samples left in the data chunk of the wav file
 	Resampler resampler;
 
 	FILE* open_sound_file(std::string path);
@@ -99,7 +75,7 @@ private:
 	int volume;
 	std::thread* thinkThread = NULL;
 	FILE* soundFile = NULL;
-	wav_hdr wavHdr;
+	WavInfo wavHdr;
 
 	uint8_t* readBuffer;
 	float* rateBufferIn;
