@@ -17,6 +17,8 @@ volatile bool g_attenuation_enabled = true;
 ChatSoundConverter* g_soundConverters[MAX_PLAYERS];
 PlayerInfo g_playerInfo[32];
 mutex playerInfoMutex;
+std::thread* thinkThread = NULL;
+volatile bool g_exitSignal;
 
 HOOK_RETURN_DATA ClientLeave(CBasePlayer* plr) {
 	g_soundConverters[plr->entindex() - 1]->listeners = 0;
@@ -123,6 +125,16 @@ APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int player
 	println("Play %s %d %d %u", fpath, pitch, volume, listeners);
 }
 
+void ChatSoundConverterThink() {
+	while (!g_exitSignal) {
+		this_thread::sleep_for(chrono::milliseconds(10));
+
+		for (int i = 0; i < MAX_PLAYERS && !g_exitSignal; i++) {
+			g_soundConverters[i]->think();
+		}
+	}
+}
+
 HOOK_RETURN_DATA StartFrame() {
 	playerInfoMutex.lock();
 	for (int i = 1; i <= gpGlobals->maxClients; i++) {
@@ -131,7 +143,6 @@ HOOK_RETURN_DATA StartFrame() {
 		g_playerInfo[i-1].pos = *(Vector*)&(plr->v.origin);
 	}
 	playerInfoMutex.unlock();
-
 	
 	for (int i = 0; i < MAX_PLAYERS; i++) {
 #ifdef SINGLE_THREAD_MODE
@@ -168,6 +179,8 @@ extern "C" int DLLEXPORT PluginInit() {
 		g_playerInfo[i].volume = 1.0f;
 	}
 
+	thinkThread = new thread(&ChatSoundConverterThink);
+
 	crc32_init();
 
 	return RegisterPlugin(&g_hooks);
@@ -175,12 +188,9 @@ extern "C" int DLLEXPORT PluginInit() {
 
 extern "C" void DLLEXPORT PluginExit() {
 	g_plugin_exiting = true;
+	g_exitSignal = true;
 
-	for (int i = 0; i < MAX_PLAYERS; i++) {
-		g_soundConverters[i]->exitSignal = true;
-	}
-
-	println("Waiting for converter threads to join...");
+	println("Waiting for converter thread to join...");
 
 	for (int i = 0; i < MAX_PLAYERS; i++) {
 		delete g_soundConverters[i];

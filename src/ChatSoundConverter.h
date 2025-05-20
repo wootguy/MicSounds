@@ -12,7 +12,7 @@
 const uint64_t steamid64_min = 0x0110000100000001;
 const uint64_t steamid64_max = 0x01100001FFFFFFFF;
 
-#define IDEAL_BUFFER_SIZE 8
+#define IDEAL_BUFFER_SIZE 4
 #define MAX_SOUND_SAMPLE_RATE 22050
 #define STREAM_BUFFER_SIZE 16384 // buffer size for file read bytes and sample rate conversion buffers
 
@@ -34,7 +34,6 @@ public:
 	PlayerInfo playerInfoCopy[MAX_PLAYERS]; // thread copy of global data
 	
 	// only write these vars from main thread
-	volatile bool exitSignal = false;
 	uint32_t listeners = 0xffffffff; // 1 bit = player is listener
 	float playbackStartTime = 0;
 	float nextPacketTime = 0;
@@ -45,7 +44,7 @@ public:
 
 	void handleCommand(std::string cmd);
 
-	void think(); // don't call directly unless in single thread mode
+	void think();
 
 	void play_samples(); // only access from main thread
 
@@ -73,7 +72,6 @@ private:
 	uint64_t steamid64;
 	int pitch;
 	int volume;
-	std::thread* thinkThread = NULL;
 	FILE* soundFile = NULL;
 	WavInfo wavHdr;
 

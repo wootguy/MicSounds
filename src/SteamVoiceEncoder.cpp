@@ -108,8 +108,6 @@ vector<uint8_t> SteamVoiceEncoder::write_steam_voice_packet(int16_t* samples, in
 	packet.push_back((crc32 >> 16) & 0xff);
 	packet.push_back((crc32 >> 24) & 0xff);
 
-	static string hex_codes = "0123456789abcdef";
-
 	return packet;
 }
 

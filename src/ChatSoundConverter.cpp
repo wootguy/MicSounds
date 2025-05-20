@@ -32,20 +32,9 @@ ChatSoundConverter::ChatSoundConverter(int playerIdx) {
 	for (int i = 0; i < MAX_PLAYERS; i++) {
 		encoder[i] = new SteamVoiceEncoder(frameSize, framesPerPacket, sampleRate, opusBitrate, OPUS_APPLICATION_AUDIO);
 	}
-
-	thinkThread = NULL;
-	#ifndef SINGLE_THREAD_MODE
-		thinkThread = new thread(&ChatSoundConverter::think, this);
-	#endif
 }
 
 ChatSoundConverter::~ChatSoundConverter() {
-	exitSignal = true;
-
-	if (thinkThread) {
-		thinkThread->join();
-		delete thinkThread;
-	}
 	for (int i = 0; i < MAX_PLAYERS; i++) {
 		delete encoder[i];
 	}	
@@ -177,21 +166,13 @@ void ChatSoundConverter::handleCommand(string cmd) {
 }
 
 void ChatSoundConverter::think() {
-	
-#ifdef SINGLE_THREAD_MODE
-	if (!exitSignal) {
-#else
-	while (!exitSignal) {
-		this_thread::sleep_for(chrono::milliseconds(50));
-#endif
-		string cmd;
-		if (commands.dequeue(cmd)) {
-			handleCommand(cmd);
-		}
+	string cmd;
+	if (commands.dequeue(cmd)) {
+		handleCommand(cmd);
+	}
 
-		while (!exitSignal && (outPackets[0].size() < IDEAL_BUFFER_SIZE) && (soundFile || encodeBuffer.size())) {
-			write_output_packet();
-		}
+	while ((outPackets[0].size() < IDEAL_BUFFER_SIZE) && (soundFile || encodeBuffer.size())) {
+		write_output_packet();
 	}
 }
 
@@ -339,7 +320,6 @@ void ChatSoundConverter::write_output_packet() {
 				volumeBuffer[k] = encodeBuffer[k] * volume;
 			}
 
-			//ALERT(at_console, "Encode %d /%d samples\n", samplesPerPacket, encodeBuffer.size());
 			voiceBytes = encoder[i]->write_steam_voice_packet(volumeBuffer, samplesPerPacket, steamid64);
 		}
 		else {
