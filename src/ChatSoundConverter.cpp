@@ -37,7 +37,12 @@ ChatSoundConverter::ChatSoundConverter(int playerIdx) {
 ChatSoundConverter::~ChatSoundConverter() {
 	for (int i = 0; i < MAX_PLAYERS; i++) {
 		delete encoder[i];
-	}	
+	}
+
+	if (soundFile) {
+		fclose(soundFile);
+		soundFile = NULL;
+	}
 
 	delete[] readBuffer;
 	delete[] rateBufferIn;
@@ -114,6 +119,15 @@ void ChatSoundConverter::play_samples() {
 	}
 }
 
+void ChatSoundConverter::clear() {
+	VoicePacket packet;
+	for (int i = 0; i < MAX_PLAYERS; i++) {
+		outPackets[i].clear();
+	}
+	commands.clear();
+	errors.clear();
+}
+
 void ChatSoundConverter::handleCommand(string cmd) {
 	vector<string> parts = splitString(cmd, "?");
 
@@ -142,6 +156,9 @@ void ChatSoundConverter::handleCommand(string cmd) {
 	int ret = parseWaveInfo(soundFile, wavHdr);
 	if (ret) {
 		errors.enqueue(UTIL_VarArgs("[MicSounds] ERROR: Invalid wav (error %d): %s\n", ret, fpath.c_str()));
+		fclose(soundFile);
+		soundFile = NULL;
+		return;
 	}
 
 	if (wavHdr.bytesPerSample != 1 || wavHdr.channels != 1) {

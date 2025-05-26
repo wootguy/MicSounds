@@ -25,9 +25,6 @@ SteamVoiceEncoder::SteamVoiceEncoder(int frameSize, int framesPerPacket, int sam
 	}
 
 	frameBuffer = new OpusFrame[framesPerPacket];
-
-	//outFile = ofstream("../testing/replay.as");
-	//outFile << "array<array<uint8>> replay = {\n";
 }
 
 SteamVoiceEncoder::~SteamVoiceEncoder()
@@ -115,12 +112,6 @@ void SteamVoiceEncoder::reset()
 {
 	opus_encoder_ctl(encoder, OPUS_RESET_STATE);
 	sequence = 0;
-}
-
-void SteamVoiceEncoder::finishTestFile()
-{
-	outFile << "};\n";
-	outFile.close();
 }
 
 void SteamVoiceEncoder::updateEncoderSettings(int bitrate)
