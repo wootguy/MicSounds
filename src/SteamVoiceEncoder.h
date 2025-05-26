@@ -26,8 +26,6 @@ public:
 	// resets encoder and sequence number for starting a new stream of audio (not necessary?)
 	void reset();
 
-	void finishTestFile();
-
 	void updateEncoderSettings(int bitrate);
 
 private:
@@ -41,6 +39,4 @@ private:
 	uint16_t sequence; // clients use this to maintain the order of opus frames
 	OpusEncoder* encoder;
 	OpusFrame* frameBuffer;
-
-	std::ofstream outFile;
 };

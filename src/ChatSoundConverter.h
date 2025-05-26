@@ -48,6 +48,8 @@ public:
 
 	void play_samples(); // only access from main thread
 
+	void clear();
+
 private:
 	// private vars only access from converter thread
 	int sampleRate; // opus allows: 8, 12, 16, 24, 48 khz
