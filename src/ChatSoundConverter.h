@@ -72,8 +72,8 @@ private:
 
 	int playerIdx;
 	uint64_t steamid64;
-	int pitch;
-	int volume;
+	int m_pitch;
+	int m_volume;
 	FILE* soundFile = NULL;
 	WavInfo wavHdr;
 
