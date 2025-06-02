@@ -137,8 +137,8 @@ void ChatSoundConverter::handleCommand(string cmd) {
 	}
 
 	string fpath = parts[0];
-	pitch = atoi(parts[1].c_str());
-	volume = atoi(parts[2].c_str());
+	m_pitch = atoi(parts[1].c_str());
+	m_volume = atoi(parts[2].c_str());
 	steamid64 = strtoull(parts[3].c_str(), NULL, 10);
 
 	if (soundFile) {
@@ -202,7 +202,7 @@ bool ChatSoundConverter::read_samples() {
 
 	int outputSampleCount = 0;
 
-	float scale = (float)volume / 100.0f;
+	float scale = (float)m_volume / 100.0f;
 
 	if (resampler.inp_count == 0) {
 		// resampler ran out of input data
@@ -241,8 +241,8 @@ bool ChatSoundConverter::read_samples() {
 
 	// TODO: pitch + volume
 	if (outputSampleCount) {
-		if (pitch != 100) {
-			float speed = (float)pitch / 100;
+		if (m_pitch != 100) {
+			float speed = (float)m_pitch / 100;
 			float samplesPerStep = (float)sampleRate / (float)sampleRate*speed;
 			int numSamplesNew = (float)outputSampleCount / samplesPerStep;
 			float t = 0;
@@ -320,6 +320,11 @@ void ChatSoundConverter::write_output_packet() {
 			float distance = (speakerPos - playerInfoCopy[i].pos).Length();
 			float volume = max(0.0f, 1.0f - distance * g_attenuation*0.01f);
 			volume = volume * volume * playerInfoCopy[i].volume; // exponential falloff
+
+			if (m_volume > 100) {
+				// need to greatly reduce volume for volume setting to have any effect on overdriven sounds
+				volume *= 0.15f;
+			}
 
 			if (playerInfoCopy[i].globalMode) {
 				volume = playerInfoCopy[i].volume;
