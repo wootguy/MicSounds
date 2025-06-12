@@ -126,12 +126,46 @@ APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int player
 }
 
 void ChatSoundConverterThink() {
+	int oldActiveEncoders = 0;
+
 	while (!g_exitSignal) {
 		this_thread::sleep_for(chrono::milliseconds(10));
 
+		int activeEncoders = 0;
+
 		for (int i = 0; i < MAX_PLAYERS && !g_exitSignal; i++) {
-			g_soundConverters[i]->think();
+			if (g_soundConverters[i]->think()) {
+				activeEncoders++;
+			}
 		}
+
+		if (activeEncoders <= 0)
+			activeEncoders = 1;
+
+		if (activeEncoders != oldActiveEncoders) {
+			int newBitrate = 32000;
+			int newComplexity = 0;
+
+			if (activeEncoders >= 4) {
+				newBitrate = 8000;
+				newComplexity = 10;
+			}
+			else if (activeEncoders >= 3) {
+				newBitrate = 12000;
+				newComplexity = 10;
+			} else if (activeEncoders >= 2) {
+				newBitrate = 16000;
+				newComplexity = 0;
+			}
+
+			//ALERT(at_console, "New encoder settings: %dbps %d complexity\n", newBitrate, newComplexity);
+
+			for (int i = 0; i < MAX_PLAYERS; i++) {
+				g_soundConverters[i]->setQuality(newBitrate, newComplexity);
+			}
+		}
+
+		oldActiveEncoders = activeEncoders;
 	}
 }
 

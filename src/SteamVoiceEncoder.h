@@ -26,7 +26,7 @@ public:
 	// resets encoder and sequence number for starting a new stream of audio (not necessary?)
 	void reset();
 
-	void updateEncoderSettings(int bitrate);
+	void updateEncoderSettings(int bitrate, int complexity);
 
 private:
 	// samples must have frameSize length
@@ -36,6 +36,7 @@ private:
 	int framesPerPacket;
 	int sampleRate;
 	int bitrate;
+	int complexity;
 	uint16_t sequence; // clients use this to maintain the order of opus frames
 	OpusEncoder* encoder;
 	OpusFrame* frameBuffer;

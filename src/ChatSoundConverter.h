@@ -44,11 +44,13 @@ public:
 
 	void handleCommand(std::string cmd);
 
-	void think();
+	bool think(); // returns true if sounds are being encoded
 
 	void play_samples(); // only access from main thread
 
 	void clear();
+
+	void setQuality(int bitrate, int complexity);
 
 private:
 	// private vars only access from converter thread
@@ -68,7 +70,8 @@ private:
 	// returns false for end of file
 	bool read_samples();
 
-	void write_output_packet(); // stream data from input wav file and write out a steam voice packet
+	// stream data from input wav file and write out a steam voice packet
+	void write_output_packet();
 
 	int playerIdx;
 	uint64_t steamid64;

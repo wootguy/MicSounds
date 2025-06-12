@@ -13,12 +13,13 @@ SteamVoiceEncoder::SteamVoiceEncoder(int frameSize, int framesPerPacket, int sam
 	this->framesPerPacket = framesPerPacket;
 	this->sampleRate = sampleRate;
 	this->bitrate = bitrate;
+	this->complexity = 0; // low quality but 2x faster encode time
 	sequence = 0;
 
 	int err = 0;
 	encoder = opus_encoder_create(sampleRate, 1, encodeMode, &err);
 	opus_encoder_ctl(encoder, OPUS_SET_BITRATE(bitrate));
-	opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(0)); // low quality but 2x faster encode time
+	opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(complexity));
 
 	if (err != OPUS_OK) {
 		fprintf(stderr, "Failed to create opus encoder %d\n", err);
@@ -114,8 +115,10 @@ void SteamVoiceEncoder::reset()
 	sequence = 0;
 }
 
-void SteamVoiceEncoder::updateEncoderSettings(int bitrate)
+void SteamVoiceEncoder::updateEncoderSettings(int bitrate, int complexity)
 {
 	this->bitrate = bitrate;
+	this->complexity = complexity;
 	opus_encoder_ctl(encoder, OPUS_SET_BITRATE(bitrate));
+	opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(complexity));
 }
