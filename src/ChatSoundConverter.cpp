@@ -128,6 +128,12 @@ void ChatSoundConverter::clear() {
 	errors.clear();
 }
 
+void ChatSoundConverter::setQuality(int bitrate, int complexity) {
+	for (int i = 0; i < gpGlobals->maxClients; i++) {
+		encoder[i]->updateEncoderSettings(bitrate, complexity);
+	}
+}
+
 void ChatSoundConverter::handleCommand(string cmd) {
 	vector<string> parts = splitString(cmd, "?");
 
@@ -182,7 +188,7 @@ void ChatSoundConverter::handleCommand(string cmd) {
 		encoder[i]->reset();
 }
 
-void ChatSoundConverter::think() {
+bool ChatSoundConverter::think() {
 	string cmd;
 	if (commands.dequeue(cmd)) {
 		handleCommand(cmd);
@@ -191,6 +197,8 @@ void ChatSoundConverter::think() {
 	while ((outPackets[0].size() < IDEAL_BUFFER_SIZE) && (soundFile || encodeBuffer.size())) {
 		write_output_packet();
 	}
+
+	return outPackets->size();
 }
 
 bool ChatSoundConverter::read_samples() {
