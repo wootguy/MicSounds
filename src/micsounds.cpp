@@ -173,8 +173,10 @@ HOOK_RETURN_DATA StartFrame() {
 	playerInfoMutex.lock();
 	for (int i = 1; i <= gpGlobals->maxClients; i++) {
 		edict_t* plr = INDEXENT(i);
-		g_playerInfo[i-1].connected = IsValidPlayer(plr);
-		g_playerInfo[i-1].pos = *(Vector*)&(plr->v.origin);
+		if (plr) {
+			g_playerInfo[i - 1].connected = IsValidPlayer(plr);
+			g_playerInfo[i - 1].pos = *(Vector*)&(plr->v.origin);
+		}
 	}
 	playerInfoMutex.unlock();
 	
