@@ -94,7 +94,7 @@ APIFUNC void stop_mic_sound(int playerIdx, bool stopForEveryone) {
 
 
 // test command: play_mic_sound twlz/poney.wav 100 22 1 2
-APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int playerIdx, uint32_t listeners) {
+APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int playerIdx, int fakePlayerIdx, uint32_t listeners) {
 	if (playerIdx < 1 || playerIdx > gpGlobals->maxClients) {
 		println("invalid player idx");
 		return;
@@ -102,25 +102,24 @@ APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int player
 
 	edict_t* eplr = INDEXENT(playerIdx);
 
-	if (!IsValidPlayer(eplr)) {
-		println("invalid player");
-		return;
-	}
-
 	string steamid = (*g_engfuncs.pfnGetPlayerAuthId)(eplr);
 	uint64_t steamid64 = steamid64_min + playerIdx;
 
-	if (steamid != "STEAM_ID_LAN" && steamid != "BOT") {
+	if (steamid != "STEAM_ID_LAN" && steamid != "BOT" && steamid != "UNKNOWN") {
 		steamid64 = steamid_to_steamid64(steamid.c_str());
 	}
 
 	string cmd = UTIL_VarArgs("%s?%d?%d?%llu", fpath, pitch, volume, steamid64);
-	int converterIdx = playerIdx - 1;
+	int converterIdx = clampi(playerIdx - 1, 0, MAX_PLAYERS-1);
 
-	g_soundConverters[converterIdx]->commands.enqueue(cmd);
+	ChatSoundConverter* converter = g_soundConverters[converterIdx];
+
+	converter->fakePlayerIdx = fakePlayerIdx;
+
+	converter->commands.enqueue(cmd);
 	for (int i = 0; i < gpGlobals->maxClients; i++)
-		g_soundConverters[converterIdx]->outPackets[i].clear();
-	g_soundConverters[converterIdx]->listeners = listeners;
+		converter->outPackets[i].clear();
+	converter->listeners = listeners;
 
 	println("Play %s %d %d %u", fpath, pitch, volume, listeners);
 }

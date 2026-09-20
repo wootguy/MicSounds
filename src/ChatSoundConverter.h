@@ -38,6 +38,7 @@ public:
 	float playbackStartTime = 0;
 	float nextPacketTime = 0;
 	int packetNum = 0;
+	int fakePlayerIdx; // audio is for a player in a different slot if > 0
 
 	ChatSoundConverter(int playerIdx);
 	~ChatSoundConverter();

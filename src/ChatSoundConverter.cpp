@@ -55,9 +55,10 @@ void ChatSoundConverter::play_samples() {
 		return;
 	}
 
-	edict_t* plr = INDEXENT(playerIdx);
+	int pidx = fakePlayerIdx > 0 ? fakePlayerIdx : playerIdx;
+	edict_t* sourcePlr = INDEXENT(pidx);
 
-	if (!IsValidPlayer(plr)) {
+	if (!IsValidPlayer(sourcePlr)) {
 		listeners = 0;
 		return;
 	}
@@ -306,7 +307,8 @@ void ChatSoundConverter::write_output_packet() {
 		playerInfoMutex.unlock();
 	}
 
-	Vector speakerPos = playerInfoCopy[playerIdx-1].pos;
+	int pidx = fakePlayerIdx > 0 ? fakePlayerIdx : playerIdx;
+	Vector speakerPos = playerInfoCopy[pidx -1].pos;
 	
 	for (int i = 0; i < gpGlobals->maxClients; i++) {
 		vector<uint8_t> voiceBytes;
