@@ -4,6 +4,7 @@
 #include <thread>
 #include <string.h>
 #include "main.h"
+#include "CBasePlayer.h"
 
 #undef read
 #undef write
@@ -88,13 +89,11 @@ void ChatSoundConverter::play_samples() {
 	}
 
 	for (int i = 1; i <= gpGlobals->maxClients; i++) {
-		edict_t* plr = INDEXENT(i);
+		CBasePlayer* plr = UTIL_PlayerByIndex(i);
+		if (!plr)
+			continue;
 		uint32_t plrBit = 1 << (i & 31);
 		VoicePacket& packet = packets[g_attenuation_enabled ? i-1 : 0];
-
-		if (!IsValidPlayer(plr)) {
-			continue;
-		}
 
 		if ((listeners & plrBit) == 0) {
 			continue;
@@ -102,6 +101,10 @@ void ChatSoundConverter::play_samples() {
 
 		if (packet.data.size() == 0) {
 			continue;
+		}
+
+		if (fakePlayerIdx && plr->GetClientInfo().engine_version == CLIENT_ENGINE_HL_XASH) {
+			continue; // (null) player crashes xash
 		}
 
 		bool reliablePackets = g_playerInfo[i-1].reliableMode;
