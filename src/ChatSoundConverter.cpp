@@ -164,6 +164,7 @@ void ChatSoundConverter::handleCommand(string cmd) {
 	m_pitch = atoi(parts[1].c_str());
 	m_volume = atoi(parts[2].c_str());
 	steamid64 = strtoull(parts[3].c_str(), NULL, 10);
+	emitterSteamid64 = parts.size() > 4 ? strtoull(parts[4].c_str(), NULL, 10) : steamid64;
 
 	if (soundFile) {
 		fclose(soundFile);
@@ -391,14 +392,15 @@ void ChatSoundConverter::write_output_packet() {
 	}
 
 	// Spectators hear it the way a player standing next to the speaker would with a 100% volume
-	// setting. Web viewers apply their own volume and mutes.
+	// setting. Web viewers apply their own volume, mutes and distance falloff. The packet has the
+	// steam id of the player who emitted the sound, not the slot it plays from.
 	{
 		float specVolume = (g_attenuation_enabled && m_volume > 100) ? 0.15f : 1.0f;
 		for (int k = 0; k < samplesPerPacket; k++) {
 			volumeBuffer[k] = encodeBuffer[k] * specVolume;
 		}
 
-		vector<uint8_t> voiceBytes = specEncoder->write_steam_voice_packet(volumeBuffer, samplesPerPacket, steamid64);
+		vector<uint8_t> voiceBytes = specEncoder->write_steam_voice_packet(volumeBuffer, samplesPerPacket, emitterSteamid64);
 		int16_t voiceLen = voiceBytes.size();
 		VoicePacket packet;
 		packet.data.push_back(playerIdx - 1);

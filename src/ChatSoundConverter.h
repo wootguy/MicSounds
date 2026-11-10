@@ -80,6 +80,7 @@ private:
 
 	int playerIdx;
 	uint64_t steamid64;
+	uint64_t emitterSteamid64; // player who emitted the sound (differs from steamid64 when fakePlayerIdx is set)
 	int m_pitch;
 	int m_volume;
 	FILE* soundFile = NULL;

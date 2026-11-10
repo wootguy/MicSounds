@@ -96,13 +96,8 @@ APIFUNC void stop_mic_sound(int playerIdx, bool stopForEveryone) {
 }
 
 
-// test command: play_mic_sound twlz/poney.wav 100 22 1 2
-APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int playerIdx, int fakePlayerIdx, uint32_t listeners) {
-	if (playerIdx < 1 || playerIdx > gpGlobals->maxClients) {
-		println("invalid player idx");
-		return;
-	}
-
+// steam id written in the voice packets of a player slot. Slots without one get a fake id from the index.
+static uint64_t voice_steamid64(int playerIdx) {
 	edict_t* eplr = INDEXENT(playerIdx);
 
 	string steamid = (*g_engfuncs.pfnGetPlayerAuthId)(eplr);
@@ -112,7 +107,25 @@ APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int player
 		steamid64 = steamid_to_steamid64(steamid.c_str());
 	}
 
-	string cmd = UTIL_VarArgs("%s?%d?%d?%llu", fpath, pitch, volume, steamid64);
+	return steamid64;
+}
+
+// test command: play_mic_sound twlz/poney.wav 100 22 1 2
+APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int playerIdx, int fakePlayerIdx, uint32_t listeners) {
+	if (playerIdx < 1 || playerIdx > gpGlobals->maxClients) {
+		println("invalid player idx");
+		return;
+	}
+
+	uint64_t steamid64 = voice_steamid64(playerIdx);
+
+	// The spectator copy says who emitted the sound, which is a different player than the slot it
+	// plays from when fakePlayerIdx is set, so the HLTV demo player can fade it by distance and
+	// apply that player's mute. Players' copies keep the slot's id.
+	bool validFake = fakePlayerIdx > 0 && fakePlayerIdx <= gpGlobals->maxClients;
+	uint64_t emitterSteamid64 = validFake ? voice_steamid64(fakePlayerIdx) : steamid64;
+
+	string cmd = UTIL_VarArgs("%s?%d?%d?%llu?%llu", fpath, pitch, volume, steamid64, emitterSteamid64);
 	int converterIdx = clampi(playerIdx - 1, 0, MAX_PLAYERS-1);
 
 	ChatSoundConverter* converter = g_soundConverters[converterIdx];
