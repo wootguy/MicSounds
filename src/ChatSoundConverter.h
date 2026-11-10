@@ -28,6 +28,9 @@ struct VoicePacket {
 struct ChatSoundConverter {
 public:
 	ThreadSafeQueue<VoicePacket> outPackets[MAX_PLAYERS];
+	// copy for HLTV spectators (MSG_SPEC), without any player's volume, falloff or mutes applied, so
+	// web viewers can set those themselves. Dequeued along with outPackets.
+	ThreadSafeQueue<VoicePacket> specPackets;
 	ThreadSafeQueue<std::string> commands;
 	ThreadSafeQueue<std::string> errors;
 
@@ -35,6 +38,7 @@ public:
 	
 	// only write these vars from main thread
 	uint32_t listeners = 0xffffffff; // 1 bit = player is listener
+	bool specListener = false; // send spectators the sound (cleared when it's stopped for everyone)
 	float playbackStartTime = 0;
 	float nextPacketTime = 0;
 	int packetNum = 0;
@@ -89,4 +93,5 @@ private:
 	
 	vector<int16_t> encodeBuffer; // samples ready to be encoded
 	SteamVoiceEncoder* encoder[MAX_PLAYERS];
+	SteamVoiceEncoder* specEncoder;
 };

@@ -22,6 +22,7 @@ volatile bool g_exitSignal;
 
 HOOK_RETURN_DATA ClientLeave(CBasePlayer* plr) {
 	g_soundConverters[plr->entindex() - 1]->listeners = 0;
+	g_soundConverters[plr->entindex() - 1]->specListener = false;
 	return HOOK_CONTINUE;
 }
 
@@ -32,6 +33,7 @@ HOOK_RETURN_DATA MapInit() {
 	for (int i = 0; i < gpGlobals->maxClients; i++) {
 		g_playerInfo[i].connected = false;
 		g_soundConverters[i]->listeners = 0;
+		g_soundConverters[i]->specListener = false;
 	}
 
 	return HOOK_CONTINUE;
@@ -80,6 +82,7 @@ APIFUNC void stop_mic_sound(int playerIdx, bool stopForEveryone) {
 
 	if (stopForEveryone) {
 		g_soundConverters[playerIdx - 1]->listeners = 0;
+		g_soundConverters[playerIdx - 1]->specListener = false;
 		println("Stop sound from player %d", playerIdx);
 	}
 	else {
@@ -119,7 +122,9 @@ APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int player
 	converter->commands.enqueue(cmd);
 	for (int i = 0; i < gpGlobals->maxClients; i++)
 		converter->outPackets[i].clear();
+	converter->specPackets.clear();
 	converter->listeners = listeners;
+	converter->specListener = true; // HLTV viewers hear every chat sound and mute them themselves
 
 	println("Play %s %d %d %u", fpath, pitch, volume, listeners);
 }

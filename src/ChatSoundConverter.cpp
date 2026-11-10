@@ -33,12 +33,14 @@ ChatSoundConverter::ChatSoundConverter(int playerIdx) {
 	for (int i = 0; i < MAX_PLAYERS; i++) {
 		encoder[i] = new SteamVoiceEncoder(frameSize, framesPerPacket, sampleRate, opusBitrate, OPUS_APPLICATION_AUDIO);
 	}
+	specEncoder = new SteamVoiceEncoder(frameSize, framesPerPacket, sampleRate, opusBitrate, OPUS_APPLICATION_AUDIO);
 }
 
 ChatSoundConverter::~ChatSoundConverter() {
 	for (int i = 0; i < MAX_PLAYERS; i++) {
 		delete encoder[i];
 	}
+	delete specEncoder;
 
 	if (soundFile) {
 		fclose(soundFile);
@@ -52,7 +54,7 @@ ChatSoundConverter::~ChatSoundConverter() {
 }
 
 void ChatSoundConverter::play_samples() {
-	if (listeners == 0) {
+	if (listeners == 0 && !specListener) {
 		return;
 	}
 
@@ -61,6 +63,7 @@ void ChatSoundConverter::play_samples() {
 
 	if (!IsValidPlayer(sourcePlr)) {
 		listeners = 0;
+		specListener = false;
 		return;
 	}
 
@@ -69,6 +72,7 @@ void ChatSoundConverter::play_samples() {
 	}
 
 	static VoicePacket packets[MAX_PLAYERS];
+	static VoicePacket specPacket;
 
 	if (outPackets[0].size() == 0) {
 		return;
@@ -82,10 +86,18 @@ void ChatSoundConverter::play_samples() {
 	else {
 		outPackets[0].dequeue(packets[0]);
 	}
+	specPacket.data.clear();
+	specPackets.dequeue(specPacket);
 
 	if (packets[0].isNewSound) {
 		packetNum = 0;
 		playbackStartTime = g_engfuncs.pfnTime();
+	}
+
+	// Spectators first, so the HLTV demo player knows to ignore the players' copies that follow.
+	// MSG_SPEC isn't sent to any player. The HLTV plugin's SendBigMessage hook records it in the demo.
+	if (specListener && specPacket.data.size()) {
+		rehlds_SendBigMessage(MSG_SPEC, SVC_VOICEDATA, &specPacket.data[0], specPacket.data.size(), 0);
 	}
 
 	for (int i = 1; i <= gpGlobals->maxClients; i++) {
@@ -128,6 +140,7 @@ void ChatSoundConverter::clear() {
 	for (int i = 0; i < MAX_PLAYERS; i++) {
 		outPackets[i].clear();
 	}
+	specPackets.clear();
 	commands.clear();
 	errors.clear();
 }
@@ -136,6 +149,7 @@ void ChatSoundConverter::setQuality(int bitrate, int complexity) {
 	for (int i = 0; i < gpGlobals->maxClients; i++) {
 		encoder[i]->updateEncoderSettings(bitrate, complexity);
 	}
+	specEncoder->updateEncoderSettings(bitrate, complexity);
 }
 
 void ChatSoundConverter::handleCommand(string cmd) {
@@ -190,6 +204,7 @@ void ChatSoundConverter::handleCommand(string cmd) {
 	startingNewSound = true;
 	for (int i = 0; i < MAX_PLAYERS; i++)
 		encoder[i]->reset();
+	specEncoder->reset();
 }
 
 bool ChatSoundConverter::think() {
@@ -373,6 +388,24 @@ void ChatSoundConverter::write_output_packet() {
 		if (!g_attenuation_enabled) {
 			break;
 		}
+	}
+
+	// Spectators hear it the way a player standing next to the speaker would with a 100% volume
+	// setting. Web viewers apply their own volume and mutes.
+	{
+		float specVolume = (g_attenuation_enabled && m_volume > 100) ? 0.15f : 1.0f;
+		for (int k = 0; k < samplesPerPacket; k++) {
+			volumeBuffer[k] = encodeBuffer[k] * specVolume;
+		}
+
+		vector<uint8_t> voiceBytes = specEncoder->write_steam_voice_packet(volumeBuffer, samplesPerPacket, steamid64);
+		int16_t voiceLen = voiceBytes.size();
+		VoicePacket packet;
+		packet.data.push_back(playerIdx - 1);
+		packet.data.push_back(voiceLen & 0xff);
+		packet.data.push_back(voiceLen >> 8);
+		packet.data.insert(packet.data.end(), voiceBytes.begin(), voiceBytes.end());
+		specPackets.enqueue(packet);
 	}
 
 	encodeBuffer.erase(encodeBuffer.begin(), encodeBuffer.begin() + samplesPerPacket);
