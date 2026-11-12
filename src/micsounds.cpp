@@ -30,11 +30,14 @@ HOOK_RETURN_DATA MapInit() {
 	// reset reliable flags to prevent desyncs/overflows when joining the game
 	// the angelscript plugin should reconfigure with a delay
 	// also stop all sounds
+	playerInfoMutex.lock();
 	for (int i = 0; i < gpGlobals->maxClients; i++) {
 		g_playerInfo[i].connected = false;
 		g_soundConverters[i]->listeners = 0;
 		g_soundConverters[i]->specListener = false;
+		g_soundConverters[i]->emitterEnt = 0;
 	}
+	playerInfoMutex.unlock();
 
 	return HOOK_CONTINUE;
 }
@@ -110,20 +113,9 @@ static uint64_t voice_steamid64(int playerIdx) {
 	return steamid64;
 }
 
-// test command: play_mic_sound twlz/poney.wav 100 22 1 2
-APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int playerIdx, int fakePlayerIdx, uint32_t listeners) {
-	if (playerIdx < 1 || playerIdx > gpGlobals->maxClients) {
-		println("invalid player idx");
-		return;
-	}
-
+static void start_mic_sound(const char* fpath, int pitch, int volume, int playerIdx, int fakePlayerIdx,
+	edict_t* emitter, uint64_t emitterSteamid64, uint32_t listeners) {
 	uint64_t steamid64 = voice_steamid64(playerIdx);
-
-	// The spectator copy says who emitted the sound, which is a different player than the slot it
-	// plays from when fakePlayerIdx is set, so the HLTV demo player can fade it by distance and
-	// apply that player's mute. Players' copies keep the slot's id.
-	bool validFake = fakePlayerIdx > 0 && fakePlayerIdx <= gpGlobals->maxClients;
-	uint64_t emitterSteamid64 = validFake ? voice_steamid64(fakePlayerIdx) : steamid64;
 
 	string cmd = UTIL_VarArgs("%s?%d?%d?%llu?%llu", fpath, pitch, volume, steamid64, emitterSteamid64);
 	int converterIdx = clampi(playerIdx - 1, 0, MAX_PLAYERS-1);
@@ -131,6 +123,14 @@ APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int player
 	ChatSoundConverter* converter = g_soundConverters[converterIdx];
 
 	converter->fakePlayerIdx = fakePlayerIdx;
+
+	playerInfoMutex.lock();
+	converter->emitterEnt = emitter ? ENTINDEX(emitter) : 0;
+	converter->emitterSerial = emitter ? emitter->serialnumber : 0;
+	if (emitter) {
+		converter->emitterPos = emitter->v.origin;
+	}
+	playerInfoMutex.unlock();
 
 	converter->commands.enqueue(cmd);
 	for (int i = 0; i < gpGlobals->maxClients; i++)
@@ -140,6 +140,44 @@ APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int player
 	converter->specListener = true; // HLTV viewers hear every chat sound and mute them themselves
 
 	println("Play %s %d %d %u", fpath, pitch, volume, listeners);
+}
+
+// test command: play_mic_sound twlz/poney.wav 100 22 1 2
+APIFUNC void play_mic_sound(const char* fpath, int pitch, int volume, int playerIdx, int fakePlayerIdx, uint32_t listeners) {
+	if (playerIdx < 1 || playerIdx > gpGlobals->maxClients) {
+		println("invalid player idx");
+		return;
+	}
+
+	// The spectator copy says who emitted the sound, which is a different player than the slot it
+	// plays from when fakePlayerIdx is set, so the HLTV demo player can fade it by distance and
+	// apply that player's mute. Players' copies keep the slot's id.
+	bool validFake = fakePlayerIdx > 0 && fakePlayerIdx <= gpGlobals->maxClients;
+	uint64_t emitterSteamid64 = voice_steamid64(validFake ? fakePlayerIdx : playerIdx);
+
+	start_mic_sound(fpath, pitch, volume, playerIdx, fakePlayerIdx, NULL, emitterSteamid64, listeners);
+}
+
+// Plays a sound that comes from an entity which isn't a player, through an empty player slot. Used
+// for the chat sounds of HLTV web viewers: the slot is the one that shows the viewer on the
+// scoreboard, and the entity is their camera, which players hear the sound fade out from. The
+// spectator copy has emitterSteamid64, the viewer's Steam ID, which the HLTV plugin lists with their
+// camera so the demo player can do the same. The sound stops if the entity is removed or a player
+// takes the slot.
+APIFUNC void play_mic_sound_from_entity(const char* fpath, int pitch, int volume, int slotIdx, int emitterEnt,
+	uint64_t emitterSteamid64, uint32_t listeners) {
+	if (slotIdx < 1 || slotIdx > gpGlobals->maxClients || UTIL_PlayerByIndex(slotIdx)) {
+		println("invalid or occupied slot");
+		return;
+	}
+
+	edict_t* emitter = emitterEnt > 0 && emitterEnt < gpGlobals->maxEntities ? INDEXENT(emitterEnt) : NULL;
+	if (!emitter || emitter->free) {
+		println("invalid emitter entity");
+		return;
+	}
+
+	start_mic_sound(fpath, pitch, volume, slotIdx, 0, emitter, emitterSteamid64, listeners);
 }
 
 void ChatSoundConverterThink() {
@@ -193,6 +231,13 @@ HOOK_RETURN_DATA StartFrame() {
 		if (plr) {
 			g_playerInfo[i - 1].connected = IsValidPlayer(plr);
 			g_playerInfo[i - 1].pos = *(Vector*)&(plr->v.origin);
+		}
+	}
+	for (int i = 0; i < MAX_PLAYERS; i++) {
+		ChatSoundConverter* converter = g_soundConverters[i];
+		edict_t* emitter = converter->emitterEnt ? INDEXENT(converter->emitterEnt) : NULL;
+		if (emitter && !emitter->free && emitter->serialnumber == converter->emitterSerial) {
+			converter->emitterPos = emitter->v.origin;
 		}
 	}
 	playerInfoMutex.unlock();

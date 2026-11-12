@@ -44,6 +44,13 @@ public:
 	int packetNum = 0;
 	int fakePlayerIdx; // audio is for a player in a different slot if > 0
 
+	// The sound comes from this entity rather than a player, and plays through this converter's
+	// slot, which has no player in it (an HLTV web viewer's chat sound, from their camera). It stops
+	// if the entity is removed or a player takes the slot. 0 = none. Write with playerInfoMutex held.
+	int emitterEnt = 0;
+	int emitterSerial = 0; // serial number of the emitter's edict, to notice a reused index
+	Vector emitterPos; // where the emitter is, updated every frame. Guarded by playerInfoMutex
+
 	ChatSoundConverter(int playerIdx);
 	~ChatSoundConverter();
 

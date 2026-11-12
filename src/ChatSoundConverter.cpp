@@ -58,10 +58,17 @@ void ChatSoundConverter::play_samples() {
 		return;
 	}
 
-	int pidx = fakePlayerIdx > 0 ? fakePlayerIdx : playerIdx;
-	edict_t* sourcePlr = INDEXENT(pidx);
+	bool sourceGone;
+	if (emitterEnt) {
+		edict_t* ent = INDEXENT(emitterEnt);
+		sourceGone = !ent || ent->free || ent->serialnumber != emitterSerial || UTIL_PlayerByIndex(playerIdx);
+	}
+	else {
+		int pidx = fakePlayerIdx > 0 ? fakePlayerIdx : playerIdx;
+		sourceGone = !IsValidPlayer(INDEXENT(pidx));
+	}
 
-	if (!IsValidPlayer(sourcePlr)) {
+	if (sourceGone) {
 		listeners = 0;
 		specListener = false;
 		return;
@@ -115,7 +122,7 @@ void ChatSoundConverter::play_samples() {
 			continue;
 		}
 
-		if (fakePlayerIdx && plr->GetClientInfo().engine_version == CLIENT_ENGINE_HL_XASH) {
+		if ((fakePlayerIdx || emitterEnt) && plr->GetClientInfo().engine_version == CLIENT_ENGINE_HL_XASH) {
 			continue; // (null) player crashes xash
 		}
 
@@ -320,14 +327,14 @@ void ChatSoundConverter::write_output_packet() {
 		}
 	}
 
+	Vector speakerPos;
 	if (g_attenuation_enabled) {
 		playerInfoMutex.lock();
 		memcpy(playerInfoCopy, g_playerInfo, sizeof(PlayerInfo) * MAX_PLAYERS);
+		int pidx = fakePlayerIdx > 0 ? fakePlayerIdx : playerIdx;
+		speakerPos = emitterEnt ? emitterPos : playerInfoCopy[pidx - 1].pos;
 		playerInfoMutex.unlock();
 	}
-
-	int pidx = fakePlayerIdx > 0 ? fakePlayerIdx : playerIdx;
-	Vector speakerPos = playerInfoCopy[pidx -1].pos;
 	
 	for (int i = 0; i < gpGlobals->maxClients; i++) {
 		vector<uint8_t> voiceBytes;
